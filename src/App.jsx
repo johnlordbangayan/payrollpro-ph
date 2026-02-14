@@ -1,34 +1,51 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from './lib/supabaseClient';
+import React, { useState } from 'react';
+import EmployeeList from './pages/EmployeeList';
+import Payroll from './pages/Payroll'; // <--- Import the new page
 
 function App() {
-  const [orgs, setOrgs] = useState([]);
-
-  useEffect(() => {
-    // Function to fetch organizations from your DB
-    const fetchOrgs = async () => {
-      const { data, error } = await supabase.from('organizations').select('*');
-      if (error) console.error('Error:', error);
-      else setOrgs(data);
-    };
-
-    fetchOrgs();
-  }, []);
+  const [currentPage, setCurrentPage] = useState('employees'); // Default page
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-      <h1>Payroll App: Admin Connection Test</h1>
-      <hr />
-      <h3>Connected Organizations:</h3>
-      {orgs.length > 0 ? (
-        <ul>
-          {orgs.map(org => (
-            <li key={org.id}>{org.name}</li>
-          ))}
-        </ul>
-      ) : (
-        <p>No organizations found. (Make sure you added one in the Supabase SQL Editor!)</p>
-      )}
+    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'sans-serif' }}>
+      
+      {/* Sidebar */}
+      <aside style={{ width: '250px', backgroundColor: '#1e293b', color: 'white', padding: '20px' }}>
+        <h2 style={{ marginBottom: '40px' }}>Payroll Admin</h2>
+        <nav>
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            
+            <li 
+              onClick={() => setCurrentPage('employees')}
+              style={{ 
+                padding: '10px', 
+                backgroundColor: currentPage === 'employees' ? '#334155' : 'transparent', 
+                borderRadius: '5px', 
+                marginBottom: '10px', 
+                cursor: 'pointer' 
+              }}>
+              👥 Employees
+            </li>
+
+            <li 
+              onClick={() => setCurrentPage('payroll')}
+              style={{ 
+                padding: '10px', 
+                backgroundColor: currentPage === 'payroll' ? '#334155' : 'transparent', 
+                borderRadius: '5px', 
+                cursor: 'pointer' 
+              }}>
+              💰 Payroll Processor
+            </li>
+
+          </ul>
+        </nav>
+      </aside>
+
+      {/* Main Content Area - Switches based on which button you clicked */}
+      <main style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+        {currentPage === 'employees' && <EmployeeList />}
+        {currentPage === 'payroll' && <Payroll />}
+      </main>
     </div>
   );
 }
