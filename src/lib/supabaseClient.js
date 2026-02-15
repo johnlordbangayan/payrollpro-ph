@@ -1,8 +1,19 @@
 import { createClient } from '@supabase/supabase-js'
 
-// These variables pull the keys from your .env.local file
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Initialize the Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  },
+  global: {
+    // This tells the client to retry requests if the connection blips
+    fetch: (...args) => fetch(...args).catch(err => {
+      console.error("Network error detected, retrying...", err);
+      return fetch(...args);
+    })
+  }
+});

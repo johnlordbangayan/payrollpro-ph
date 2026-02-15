@@ -1,87 +1,244 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import AddEmployeeModal from '../components/AddEmployeeModal'; // <--- Import the new component
+import EmployeeModal from './EmployeeModal'; 
 
-export default function EmployeeList() {
+export default function EmployeeList({ organizationId }) {
+  const fileInputRef = useRef(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false); // <--- Controls the popup
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // MODAL STATES
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
 
+  // 1. FETCH & ALPHABETICAL SORT
+  const fetchEmployees = async () => {
+    // Only show loading if we don't have data yet to prevent flickering on tab focus
+    if (employees.length === 0) setLoading(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('last_name', { ascending: true });
+
+      if (error) throw error;
+      setEmployees(data || []);
+    } catch (err) {
+      console.error("Fetch Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- RECOVERY LOGIC ---
   useEffect(() => {
+    // Listen for Tab Focus / Computer Wake
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("Tab focused: Refreshing Employee Directory...");
+        fetchEmployees();
+      }
+    };
+
     fetchEmployees();
-  }, []);
 
-  async function fetchEmployees() {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('employees')
-      .select('*')
-      .order('last_name', { ascending: true });
+    document.addEventListener('visibilitychange', handleFocus);
+    return () => document.removeEventListener('visibilitychange', handleFocus);
+  }, [organizationId]);
 
-    if (error) console.error('Error:', error);
-    else setEmployees(data);
-    setLoading(false);
-  }
+  useEffect(() => { fetchEmployees(); }, [organizationId]);
+
+  const handleEdit = (emp) => {
+    setEditingEmployee(emp);
+    setIsModalOpen(true);
+  };
+
+  const handleAddNew = () => {
+    setEditingEmployee(null);
+    setIsModalOpen(true);
+  };
+
+  // --- 2. MASTER EXPORT (All 17 Fields) ---
+  const masterFields = [
+    "employee_id_number", "first_name", "middle_name", "last_name", "extension_name",
+    "email", "phone_number", "position", "department", "employment_status",
+    "employment_type", "date_hired", "salary_rate", "tin_number", 
+    "sss_number", "philhealth_number", "pagibig_number"
+  ];
+
+  const handleExport = () => {
+    const rows = employees.map(e => masterFields.map(f => e[f] || ''));
+    const csvContent = "data:text/csv;charset=utf-8," + [masterFields, ...rows].map(e => e.join(",")).join("\n");
+    const link = document.createElement("a");
+    link.setAttribute("href", encodeURI(csvContent));
+    link.setAttribute("download", `Full_Employee_Masterlist.csv`);
+    link.click();
+  };
+
+  // --- 3. ROBUST IMPORT WITH SUCCESS COUNTER & DATA CLEANING ---
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async ({ target }) => {
+      try {
+        const lines = target.result.split(/\r?\n/).filter(l => l.trim() !== '');
+        if (lines.length < 2) throw new Error("CSV file is empty.");
+
+        // Clean headers: lowercase and remove spaces
+        const csvHeaders = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        let newCount = 0;
+        let updateCount = 0;
+
+        const payload = lines.slice(1).map(line => {
+          const values = line.split(',').map(v => v.trim());
+          const obj = { organization_id: organizationId };
+
+          masterFields.forEach(field => {
+            const index = csvHeaders.indexOf(field);
+            if (index !== -1) {
+              let val = values[index];
+              
+              // Clean Salary Rate: Remove non-numeric characters
+              if (field === 'salary_rate') {
+                val = parseFloat(val.replace(/[^0-9.]/g, '')) || 0;
+              }
+              
+              obj[field] = val === "" ? null : val;
+            }
+          });
+
+          // Counter Logic
+          const exists = employees.some(emp => String(emp.employee_id_number) === String(obj.employee_id_number));
+          if (exists) updateCount++; else newCount++;
+
+          return obj;
+        });
+
+        const { error } = await supabase
+          .from('employees')
+          .upsert(payload, { onConflict: 'employee_id_number, organization_id' });
+
+        if (error) throw error;
+        
+        alert(`Bulk Sync Successful!\n\n✨ New: ${newCount}\n📝 Updated: ${updateCount}\n📊 Total: ${payload.length}`);
+        fetchEmployees();
+      } catch (err) {
+        console.error("Import Error:", err);
+        alert("Import failed. Ensure you've run the SQL command and check formatting: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null;
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to delete ${name}?`)) return;
+    const { error } = await supabase.from('employees').delete().eq('id', id);
+    if (error) alert(error.message);
+    else fetchEmployees();
+  };
+
+  const filteredEmployees = employees.filter(emp => 
+    `${emp.first_name} ${emp.last_name} ${emp.employee_id_number} ${emp.department}`.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div style={{ padding: '20px', color: '#0f172a' }}>
-      
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2 style={{ color: '#0f172a', margin: 0 }}>👥 Employee Master List</h2>
-        <button 
-          style={{ padding: '10px 20px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
-          onClick={() => setIsModalOpen(true)} // <--- Open the modal on click
-        >
-          + Add New Employee
-        </button>
+    <div style={containerStyle}>
+      <div style={headerSection}>
+        <div>
+          <h2 style={{ margin: 0 }}>👥 Employee Directory</h2>
+          <p style={subText}>Manage workforce manually or via bulk CSV sync.</p>
+        </div>
+        
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={handleExport} style={secondaryBtn}>📤 Export Master</button>
+          <input type="file" ref={fileInputRef} onChange={handleImport} style={{ display: 'none' }} accept=".csv" />
+          <button onClick={() => fileInputRef.current.click()} style={importBtn}>📥 Import CSV</button>
+          <button onClick={handleAddNew} style={addBtn}>+ Add Employee</button>
+        </div>
       </div>
 
-      {loading ? (
-        <p>Loading records...</p>
-      ) : (
-        <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                <th style={{ padding: '12px', textAlign: 'left', color: '#334155' }}>Name</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: '#334155' }}>Position</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: '#334155' }}>Hourly Rate</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: '#334155' }}>Status</th>
+      <div style={filterBar}>
+        <input 
+          type="text" 
+          placeholder="🔍 Search name, ID number, or department..." 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={searchStyle}
+        />
+      </div>
+
+      <div style={tableCard}>
+        <table style={tableStyle}>
+          <thead>
+            <tr style={theadStyle}>
+              <th style={th}>ID & Status</th>
+              <th style={th}>Full Name</th>
+              <th style={th}>Dept & Position</th>
+              <th style={th}>Salary Rate</th>
+              <th style={{ ...th, textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEmployees.map(emp => (
+              <tr key={emp.id} style={trStyle}>
+                <td style={td}>
+                   <div style={{fontWeight:'bold'}}>{emp.employee_id_number}</div>
+                   <span style={emp.employment_status === 'Active' ? statusActive : statusInactive}>{emp.employment_status}</span>
+                </td>
+                <td style={td}>
+                  <strong>{emp.last_name.toUpperCase()}, {emp.first_name}</strong>
+                  <div style={{fontSize:'0.75rem', color:'#64748b'}}>{emp.email || 'No email'}</div>
+                </td>
+                <td style={td}>
+                  <div style={{ fontWeight: 'bold' }}>{emp.department}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{emp.position}</div>
+                </td>
+                <td style={td}>₱{Number(emp.salary_rate).toLocaleString()}</td>
+                <td style={{ ...td, textAlign: 'right' }}>
+                  <button onClick={() => handleEdit(emp)} style={editBtn}>Edit</button>
+                  <button onClick={() => handleDelete(emp.id, emp.last_name)} style={delBtn}>Delete</button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {employees.map((emp) => (
-                <tr key={emp.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px', color: '#0f172a' }}>{emp.last_name}, {emp.first_name}</td>
-                  <td style={{ padding: '12px', color: '#334155' }}>{emp.job_title}</td>
-                  <td style={{ padding: '12px', color: '#0f172a' }}>₱{emp.hourly_rate}</td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{ 
-                        padding: '4px 8px', 
-                        borderRadius: '12px', 
-                        // Check if the text is exactly 'Active'
-                        backgroundColor: emp.employment_status === 'Active' ? '#dcfce7' : '#fee2e2',
-                        color: emp.employment_status === 'Active' ? '#166534' : '#991b1b',
-                        fontSize: '0.8rem',
-                        fontWeight: '500'
-                    }}>
-                        {emp.employment_status} {/* Display the text directly */}
-                    </span>
-                    </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {isModalOpen && (
+        <EmployeeModal 
+          organizationId={organizationId} 
+          employee={editingEmployee}
+          onClose={() => { setIsModalOpen(false); setEditingEmployee(null); }} 
+          onSuccess={() => { setIsModalOpen(false); setEditingEmployee(null); fetchEmployees(); }} 
+        />
       )}
-
-      {/* The Popup Component */}
-      <AddEmployeeModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSave={fetchEmployees} // <--- When saved, re-fetch the list automatically!
-      />
-
     </div>
   );
 }
+
+// STYLES
+const containerStyle = { maxWidth: '1400px', margin: 'auto', padding: '20px' };
+const headerSection = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const subText = { color: '#64748b', fontSize: '0.85rem' };
+const filterBar = { marginBottom: '20px' };
+const searchStyle = { width: '100%', padding: '12px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', outline: 'none' };
+const addBtn = { background: '#2563eb', color: 'white', padding: '12px 24px', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' };
+const importBtn = { background: '#6366f1', color: 'white', padding: '12px 24px', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' };
+const secondaryBtn = { background: '#f8fafc', color: '#64748b', padding: '12px 24px', border: '1px solid #e2e8f0', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' };
+const tableCard = { background: 'white', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', overflow: 'hidden' };
+const tableStyle = { width: '100%', borderCollapse: 'collapse' };
+const theadStyle = { background: '#f8fafc', textAlign: 'left' };
+const th = { padding: '16px', fontSize: '0.7rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase' };
+const td = { padding: '16px', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' };
+const trStyle = { transition: 'background 0.2s' };
+const statusActive = { padding: '2px 8px', background: '#dcfce7', color: '#166534', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' };
+const statusInactive = { padding: '2px 8px', background: '#fee2e2', color: '#991b1b', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' };
+const editBtn = { background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', padding: '5px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer', marginRight: '5px' };
+const delBtn = { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', padding: '5px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer' };
