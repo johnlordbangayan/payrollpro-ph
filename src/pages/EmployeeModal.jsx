@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
-export default function EmployeeModal({ organizationId, employee, onClose, onSuccess }) {
+export default function EmployeeModal({ organizationId, orgSettings, employee, onClose, onSuccess }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const isEdit = !!employee;
+
+  // The divisor/multiplier from your settings (e.g., 313 for 6 days/week or 261 for 5 days/week)
+  const workingDaysFactor = parseFloat(orgSettings?.working_days_per_year) || 313;
+
+  // Local state for the daily rate to prevent cursor jumping while typing
+  const [localDaily, setLocalDaily] = useState('');
 
   const [formData, setFormData] = useState({
     employee_id_number: '',
@@ -19,59 +25,111 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
     employment_status: 'Active',
     employment_type: 'Full-time',
     date_hired: new Date().toISOString().split('T')[0],
-    salary_rate: '',
+    salary_rate: '', // Monthly Rate (The only value saved to DB)
     tin_number: '',
     sss_number: '',
     philhealth_number: '',
     pagibig_number: ''
   });
 
-  // --- CRASH PROTECTION: Handling the RPC and Initial Data ---
+  // --- INITIALIZATION & SYNC ---
   useEffect(() => {
     if (isEdit && employee) {
       setFormData({ ...employee });
+      // Pre-calculate daily rate for display when editing
+      if (employee.salary_rate) {
+        const daily = ((parseFloat(employee.salary_rate) * 12) / workingDaysFactor).toFixed(2);
+        setLocalDaily(daily);
+      }
     } else {
       const getNextId = async () => {
         try {
           const { data, error } = await supabase.rpc('get_next_employee_number', { org_id: organizationId });
-          
-          // Defense: Check if data exists before calling .toString()
-          if (!error && data !== null && data !== undefined) {
+          if (!error && data !== null) {
             setFormData(prev => ({ ...prev, employee_id_number: data.toString() }));
-          } else {
-            // Fallback: If DB function fails, leave empty for manual entry
-            console.warn("RPC failed or returned null, defaulting to empty ID");
-            setFormData(prev => ({ ...prev, employee_id_number: '' }));
           }
-        } catch (err) {
-          console.error("Critical error fetching ID:", err);
-        }
+        } catch (err) { console.error(err); }
       };
       getNextId();
     }
-  }, [employee, organizationId, isEdit]);
+  }, [employee, organizationId, isEdit, workingDaysFactor]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // --- BIDIRECTIONAL RATE HANDLERS ---
+
+  const handleMonthlyChange = (e) => {
+    const val = e.target.value;
+    setFormData(prev => ({ ...prev, salary_rate: val }));
+    
+    // Sync daily display (only if value is a valid number)
+    if (val && !isNaN(val)) {
+      const computedDaily = ((parseFloat(val) * 12) / workingDaysFactor).toFixed(2);
+      setLocalDaily(computedDaily);
+    } else {
+      setLocalDaily('');
+    }
+  };
+
+  const handleDailyChange = (e) => {
+    const val = e.target.value;
+    setLocalDaily(val); // Update text immediately so typing feels natural
+    
+    // Sync Monthly state (Database Source of Truth)
+    if (val && !isNaN(val)) {
+      const computedMonthly = (parseFloat(val) * workingDaysFactor) / 12;
+      setFormData(prev => ({ ...prev, salary_rate: computedMonthly.toFixed(2) }));
+    } else {
+      setFormData(prev => ({ ...prev, salary_rate: '' }));
+    }
+  };
+
   const executeSave = async () => {
+    // 1. Basic Validation
+    if (!formData.first_name || !formData.last_name) {
+      return alert("Please fill in the required name fields.");
+    }
+
     setLoading(true);
     try {
+      // 2. Data Cleaning: Ensure salary is a pure number for the DB
+      const cleanSalary = formData.salary_rate 
+        ? parseFloat(formData.salary_rate.toString().replace(/[^0-9.]/g, '')) 
+        : 0;
+
+      const payload = { 
+        ...formData, 
+        organization_id: organizationId,
+        salary_rate: cleanSalary 
+      };
+
       if (isEdit) {
-        // Strip out Supabase metadata before updating
-        const { id, created_at, updated_at, organization_id, ...updateData } = formData;
-        const { error } = await supabase.from('employees').update(updateData).eq('id', id);
+        // Remove Supabase metadata and local IDs that shouldn't be patched
+        const { id, created_at, updated_at, ...updateData } = payload;
+        const { error } = await supabase
+          .from('employees')
+          .update(updateData)
+          .eq('id', id);
+        
         if (error) throw error;
       } else {
-        // Insert new record with current organization_id
-        const { error } = await supabase.from('employees').insert([{ ...formData, organization_id: organizationId }]);
+        const { error } = await supabase
+          .from('employees')
+          .insert([payload]);
+        
         if (error) throw error;
       }
+
+      // 3. Success Callback (Triggers list refresh in parent)
       onSuccess();
     } catch (err) {
-      alert("Save failed: " + err.message);
+      console.error("Critical Save Error:", err);
+      // Detailed error message for the user
+      alert(`Save failed: ${err.message || 'Check your network connection and try again.'}`);
     } finally {
+      // 4. GUARANTEE: This clears the "Saving..." state so the modal isn't stuck
       setLoading(false);
     }
   };
@@ -86,7 +144,6 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
         </div>
 
         <div>
-          {/* STEP 1: PERSONAL DETAILS */}
           {step === 1 && (
             <div style={sectionStyle}>
               <h3 style={sectionTitle}>👤 Personal Details</h3>
@@ -101,7 +158,6 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
             </div>
           )}
 
-          {/* STEP 2: EMPLOYMENT DETAILS */}
           {step === 2 && (
             <div style={sectionStyle}>
               <h3 style={sectionTitle}>💼 Employment Details</h3>
@@ -112,7 +168,6 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
                 </div>
                 <input name="position" placeholder="Position" value={formData.position || ''} onChange={handleChange} style={inputStyle} />
                 <input name="department" placeholder="Department" value={formData.department || ''} onChange={handleChange} style={inputStyle} />
-                
                 <select name="employment_status" value={formData.employment_status || 'Active'} onChange={handleChange} style={inputStyle}>
                   <option value="Active">Active</option>
                   <option value="Terminated">Terminated</option>
@@ -131,15 +186,39 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
             </div>
           )}
 
-          {/* STEP 3: FINANCIALS & IDS */}
           {step === 3 && (
             <div style={sectionStyle}>
               <h3 style={sectionTitle}>🏦 Financials & Government IDs</h3>
               <div style={formGrid}>
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={labelStyle}>Monthly Salary Rate (₱)</label>
-                  <input name="salary_rate" type="number" placeholder="0.00" value={formData.salary_rate || ''} onChange={handleChange} style={inputStyle} />
+                <div style={fieldBox}>
+                  <label style={labelStyle}>Monthly Rate (₱)</label>
+                  <input 
+                    name="salary_rate" 
+                    type="number" 
+                    step="any"
+                    placeholder="0.00" 
+                    value={formData.salary_rate || ''} 
+                    onChange={handleMonthlyChange} 
+                    style={inputStyle} 
+                  />
                 </div>
+                <div style={fieldBox}>
+                  <label style={labelStyle}>Daily Rate (₱)</label>
+                  <input 
+                    name="daily_rate" 
+                    type="number" 
+                    step="any"
+                    placeholder="0.00" 
+                    value={localDaily} 
+                    onChange={handleDailyChange} 
+                    style={{...inputStyle, backgroundColor: '#f8fafc'}} 
+                  />
+                </div>
+                
+                <div style={{ gridColumn: 'span 2', fontSize: '0.65rem', color: '#94a3b8', marginBottom: '10px' }}>
+                  * Syncing rates based on <b>{workingDaysFactor}</b> working days per year.
+                </div>
+
                 <input name="tin_number" placeholder="TIN Number" value={formData.tin_number || ''} onChange={handleChange} style={inputStyle} />
                 <input name="sss_number" placeholder="SSS Number" value={formData.sss_number || ''} onChange={handleChange} style={inputStyle} />
                 <input name="philhealth_number" placeholder="PhilHealth Number" value={formData.philhealth_number || ''} onChange={handleChange} style={inputStyle} />
@@ -148,15 +227,9 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
             </div>
           )}
 
-          {/* NAVIGATION BUTTONS */}
           <div style={buttonRow}>
-            {step > 1 && (
-              <button type="button" onClick={() => setStep(step - 1)} style={secondaryBtn}>Back</button>
-            )}
-            {step === 1 && (
-               <button type="button" onClick={onClose} style={cancelBtn}>Cancel</button>
-            )}
-
+            {step > 1 && <button type="button" onClick={() => setStep(step - 1)} style={secondaryBtn}>Back</button>}
+            {step === 1 && <button type="button" onClick={onClose} style={cancelBtn}>Cancel</button>}
             {step < 3 ? (
               <button type="button" onClick={() => setStep(step + 1)} style={primaryBtn}>Next</button>
             ) : (
@@ -171,7 +244,7 @@ export default function EmployeeModal({ organizationId, employee, onClose, onSuc
   );
 }
 
-// --- STYLES (REMAINING UNCHANGED) ---
+// --- STYLES ---
 const modalOverlay = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' };
 const modalContent = { backgroundColor: 'white', padding: '30px', borderRadius: '16px', width: '550px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' };
 const headerStyle = { marginBottom: '25px' };
@@ -180,6 +253,7 @@ const progressFill = { height: '100%', backgroundColor: '#2563eb', transition: '
 const sectionStyle = { minHeight: '280px' };
 const sectionTitle = { fontSize: '1.1rem', color: '#1e293b', marginBottom: '15px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' };
 const formGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' };
+const fieldBox = { display: 'flex', flexDirection: 'column' };
 const inputStyle = { padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', width: '100%', boxSizing: 'border-box', outline: 'none' };
 const labelStyle = { display: 'block', fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', marginBottom: '5px' };
 const buttonRow = { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '30px' };

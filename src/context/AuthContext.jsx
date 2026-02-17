@@ -5,54 +5,37 @@ const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [myOrganizations, setMyOrganizations] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const fetchUserOrgs = async (userId) => {
-    try {
-      const { data, error } = await supabase
-        .from('organization_members')
-        .select('organizations(id, name)')
-        .eq('user_id', userId);
-      
-      if (error) throw error;
-      if (data) {
-        setMyOrganizations(data.map(d => d.organizations).filter(Boolean));
-      }
-    } catch (err) {
-      console.error("Org fetch blocked or failed:", err.message);
+  // Simple, direct fetch (Matches your old fetchProfile logic)
+  const refreshOrgs = async (userId) => {
+    if (!userId) return;
+    const { data } = await supabase
+      .from('organization_members')
+      .select('organizations(id, name)')
+      .eq('user_id', userId);
+    
+    if (data) {
+      setMyOrganizations(data.map(d => d.organizations).filter(Boolean));
     }
   };
 
   useEffect(() => {
-    // Standard function-based timeout (Safe from CSP 'unsafe-eval' restrictions)
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 5000); // Increased to 5s to give blocked scripts more time to timeout
-
-    const init = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-
-        if (session?.user) {
-          setUser(session.user);
-          await fetchUserOrgs(session.user.id);
-        }
-      } catch (err) {
-        console.error("Session init error:", err.message);
-      } finally {
-        clearTimeout(timer);
-        setLoading(false); // Force loading off regardless of success
-      }
-    };
-
-    init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // 1. Direct Session Check (Just like your old App.js)
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
-        await fetchUserOrgs(session.user.id);
+        refreshOrgs(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    // 2. Auth Listener (The "Heartbeat")
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        refreshOrgs(session.user.id);
       } else {
         setUser(null);
         setMyOrganizations([]);
@@ -60,23 +43,24 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     });
 
+    // 3. Tab Focus Recovery (The "Poke")
+    const handleFocus = () => {
+        if (document.visibilityState === 'visible') {
+            supabase.auth.getSession().then(({ data: { session } }) => {
+                if (session?.user) refreshOrgs(session.user.id);
+            });
+        }
+    };
+    window.addEventListener('visibilitychange', handleFocus);
+
     return () => {
-      subscription.unsubscribe();
-      clearTimeout(timer);
+      if (authListener?.subscription?.unsubscribe) authListener.subscription.unsubscribe();
+      window.removeEventListener('visibilitychange', handleFocus);
     };
   }, []);
 
-  // Simplified provider value for better performance
-  const value = {
-    user,
-    loading,
-    myOrganizations,
-    // Add refresh manually so we can trigger it from CreateOrg later
-    refreshOrgs: () => user && fetchUserOrgs(user.id)
-  };
-
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, myOrganizations, loading, refreshOrgs }}>
       {children}
     </AuthContext.Provider>
   );

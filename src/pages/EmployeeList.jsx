@@ -8,14 +8,12 @@ export default function EmployeeList({ organizationId }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // MODAL STATES
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
 
-  // 1. FETCH & ALPHABETICAL SORT
-  const fetchEmployees = async () => {
-    // Only show loading if we don't have data yet to prevent flickering on tab focus
-    if (employees.length === 0) setLoading(true);
+  // 1. FETCH LOGIC
+  const fetchEmployees = async (showLoading = true) => {
+    if (showLoading && employees.length === 0) setLoading(true);
     
     try {
       const { data, error } = await supabase
@@ -33,24 +31,22 @@ export default function EmployeeList({ organizationId }) {
     }
   };
 
-  // --- RECOVERY LOGIC ---
+  // --- RECOVERY LOGIC (The Focus Fix) ---
   useEffect(() => {
-    // Listen for Tab Focus / Computer Wake
+    fetchEmployees();
+
     const handleFocus = () => {
-      if (document.visibilityState === 'visible') {
-        console.log("Tab focused: Refreshing Employee Directory...");
-        fetchEmployees();
+      // We only auto-refresh if the user isn't currently editing (Modal closed)
+      if (document.visibilityState === 'visible' && !isModalOpen) {
+        fetchEmployees(false); // false means "don't show the loading screen"
       }
     };
 
-    fetchEmployees();
-
     document.addEventListener('visibilitychange', handleFocus);
     return () => document.removeEventListener('visibilitychange', handleFocus);
-  }, [organizationId]);
+  }, [organizationId, isModalOpen]);
 
-  useEffect(() => { fetchEmployees(); }, [organizationId]);
-
+  // --- HANDLERS ---
   const handleEdit = (emp) => {
     setEditingEmployee(emp);
     setIsModalOpen(true);
@@ -61,7 +57,6 @@ export default function EmployeeList({ organizationId }) {
     setIsModalOpen(true);
   };
 
-  // --- 2. MASTER EXPORT (All 17 Fields) ---
   const masterFields = [
     "employee_id_number", "first_name", "middle_name", "last_name", "extension_name",
     "email", "phone_number", "position", "department", "employment_status",
@@ -78,7 +73,6 @@ export default function EmployeeList({ organizationId }) {
     link.click();
   };
 
-  // --- 3. ROBUST IMPORT WITH SUCCESS COUNTER & DATA CLEANING ---
   const handleImport = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -88,8 +82,6 @@ export default function EmployeeList({ organizationId }) {
       try {
         const lines = target.result.split(/\r?\n/).filter(l => l.trim() !== '');
         if (lines.length < 2) throw new Error("CSV file is empty.");
-
-        // Clean headers: lowercase and remove spaces
         const csvHeaders = lines[0].split(',').map(h => h.trim().toLowerCase());
         
         let newCount = 0;
@@ -98,39 +90,27 @@ export default function EmployeeList({ organizationId }) {
         const payload = lines.slice(1).map(line => {
           const values = line.split(',').map(v => v.trim());
           const obj = { organization_id: organizationId };
-
           masterFields.forEach(field => {
             const index = csvHeaders.indexOf(field);
             if (index !== -1) {
               let val = values[index];
-              
-              // Clean Salary Rate: Remove non-numeric characters
-              if (field === 'salary_rate') {
-                val = parseFloat(val.replace(/[^0-9.]/g, '')) || 0;
+              if (field === 'salary_rate' && val) {
+                val = parseFloat(val.toString().replace(/[^0-9.]/g, '')) || 0;
               }
-              
               obj[field] = val === "" ? null : val;
             }
           });
-
-          // Counter Logic
           const exists = employees.some(emp => String(emp.employee_id_number) === String(obj.employee_id_number));
           if (exists) updateCount++; else newCount++;
-
           return obj;
         });
 
-        const { error } = await supabase
-          .from('employees')
-          .upsert(payload, { onConflict: 'employee_id_number, organization_id' });
-
+        const { error } = await supabase.from('employees').upsert(payload, { onConflict: 'employee_id_number, organization_id' });
         if (error) throw error;
-        
-        alert(`Bulk Sync Successful!\n\n✨ New: ${newCount}\n📝 Updated: ${updateCount}\n📊 Total: ${payload.length}`);
-        fetchEmployees();
+        alert(`Bulk Sync Successful!\n\n✨ New: ${newCount}\n📝 Updated: ${updateCount}`);
+        fetchEmployees(false);
       } catch (err) {
-        console.error("Import Error:", err);
-        alert("Import failed. Ensure you've run the SQL command and check formatting: " + err.message);
+        alert("Import failed: " + err.message);
       }
     };
     reader.readAsText(file);
@@ -141,12 +121,17 @@ export default function EmployeeList({ organizationId }) {
     if (!window.confirm(`Are you sure you want to delete ${name}?`)) return;
     const { error } = await supabase.from('employees').delete().eq('id', id);
     if (error) alert(error.message);
-    else fetchEmployees();
+    else fetchEmployees(false);
   };
 
   const filteredEmployees = employees.filter(emp => 
     `${emp.first_name} ${emp.last_name} ${emp.employee_id_number} ${emp.department}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // 2. RENDER LOGIC
+  if (loading && employees.length === 0) {
+    return <div style={{ height: '70vh', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#64748b', fontWeight: 'bold' }}>Syncing Data...</div>;
+  }
 
   return (
     <div style={containerStyle}>
@@ -155,7 +140,6 @@ export default function EmployeeList({ organizationId }) {
           <h2 style={{ margin: 0 }}>👥 Employee Directory</h2>
           <p style={subText}>Manage workforce manually or via bulk CSV sync.</p>
         </div>
-        
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={handleExport} style={secondaryBtn}>📤 Export Master</button>
           <input type="file" ref={fileInputRef} onChange={handleImport} style={{ display: 'none' }} accept=".csv" />
@@ -216,14 +200,14 @@ export default function EmployeeList({ organizationId }) {
           organizationId={organizationId} 
           employee={editingEmployee}
           onClose={() => { setIsModalOpen(false); setEditingEmployee(null); }} 
-          onSuccess={() => { setIsModalOpen(false); setEditingEmployee(null); fetchEmployees(); }} 
+          onSuccess={() => { setIsModalOpen(false); setEditingEmployee(null); fetchEmployees(false); }} 
         />
       )}
     </div>
   );
 }
 
-// STYLES
+// --- ALL STYLES RE-ADDED ---
 const containerStyle = { maxWidth: '1400px', margin: 'auto', padding: '20px' };
 const headerSection = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const subText = { color: '#64748b', fontSize: '0.85rem' };

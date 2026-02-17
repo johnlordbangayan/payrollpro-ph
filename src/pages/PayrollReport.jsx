@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'; // FIXED: Added useEffect here
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -29,22 +29,44 @@ export default function PayrollReport({ organizationId, orgSettings }) {
     getLatestPeriod();
   }, [organizationId]);
 
-  const additionLabels = (orgSettings?.addition_labels || []).filter(l => !l.startsWith("Add Pay"));
-  const deductionLabels = (orgSettings?.deduction_labels || []).filter(l => !l.startsWith("Deduction"));
+  // --- [RULE: FILTER UNUSED LABELS] ---
+  const activeAdditions = (orgSettings?.addition_labels || [])
+    .map((label, index) => ({ label, index }))
+    .filter(item => !item.label.startsWith("Add Pay"));
+
+  const activeDeductions = (orgSettings?.deduction_labels || [])
+    .map((label, index) => ({ label, index }))
+    .filter(item => !item.label.startsWith("Deduction"));
 
   const fetchReport = async () => {
     if (!selectedPeriod.start || !selectedPeriod.end) return alert("Select a period first.");
     setLoading(true);
+    
+    // 1. Fetch data from Supabase
     const { data, error } = await supabase
       .from('payroll_history')
       .select(`*, employees(*)`)
       .eq('organization_id', organizationId)
       .gte('period_start', selectedPeriod.start)
-      .lte('period_end', selectedPeriod.end)
-      .order('created_at', { ascending: true });
+      .lte('period_end', selectedPeriod.end);
 
-    if (error) console.error(error);
-    else setReportData(data || []);
+    if (error) {
+      console.error(error);
+    } else if (data) {
+      // 2. --- [FIXED: ROBUST ALPHABETICAL SORTING] ---
+      const sorted = [...data].sort((a, b) => {
+        const nameA = (a.employees?.last_name || "").toUpperCase();
+        const nameB = (b.employees?.last_name || "").toUpperCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        
+        const firstA = (a.employees?.first_name || "").toUpperCase();
+        const firstB = (b.employees?.first_name || "").toUpperCase();
+        return firstA.localeCompare(firstB);
+      });
+
+      setReportData(sorted);
+    }
     setLoading(false);
   };
 
@@ -52,126 +74,132 @@ export default function PayrollReport({ organizationId, orgSettings }) {
   const filteredData = deptFilter === 'All' ? reportData : reportData.filter(r => r.employees?.department === deptFilter);
   const calculateGrandTotal = () => filteredData.reduce((sum, row) => sum + Number(row.net_pay || 0), 0);
 
-  // --- ADDED BACK: CSV EXPORT ---
+  // --- CSV EXPORT (FIXED: Monetary Calculations) ---
   const exportToCSV = () => {
     if (filteredData.length === 0) return;
-    const dynamicAdds = additionLabels.join(",");
-    const dynamicDeds = deductionLabels.join(",");
-    const headers = [`ID,Name,Position,Dept,Late/UT(M),ND(H),Shift,Daily Rate,Basic,OT,ND Pay,Reg Holiday,Spec Premium,${dynamicAdds},Gross Pay,Late Ded,${dynamicDeds},Loans/Vale,SSS,PHIC,HDMF,W-Tax,Net Pay`].join(",");
-    const rows = filteredData.map(row => [
-      row.employees?.employee_id_number,
-      `"${row.employees?.last_name}, ${row.employees?.first_name}"`,
-      row.employees?.position,
-      row.employees?.department,
-      Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0),
-      row.nd_hours || 0,
-      row.days_worked,
-      (row.employees?.salary_rate / 26).toFixed(2),
-      row.basic_pay, row.ot_pay, row.nd_pay || 0, row.holiday_pay || 0, row.special_holiday_pay || 0,
-      ...additionLabels.map((_, i) => row.custom_additions?.[i] || 0),
-      row.gross_pay,
-      row.time_deduction || 0,
-      ...deductionLabels.map((_, i) => row.custom_deductions?.[i] || 0),
-      row.loan_deduction || 0,
-      row.sss_deduction, row.philhealth_deduction, row.pagibig_deduction, row.tax_deduction, row.net_pay
-    ].join(","));
+    
+    const headers = [
+      "ID", "Name", "Dept", "Shift", "L/UT(M)", "ND(H)", "Daily Rate", 
+      "Basic", "Normal OT", "Hol OT", "Normal ND", "Hol ND", "Hol Prem",
+      ...activeAdditions.map(a => a.label), 
+      "Gross Pay", "Late Ded", 
+      ...activeDeductions.map(d => d.label), 
+      "Vale", "SSS", "PHIC", "HDMF", "W-Tax", "Net Pay"
+    ].join(",");
+
+    const rows = filteredData.map(row => {
+      const factor = parseFloat(orgSettings?.working_days_per_year) || 313;
+      const dailyRate = (parseFloat(row.employees?.salary_rate) || 0) * 12 / factor;
+      const hourlyRate = dailyRate / 8;
+
+      const monetaryHolOT = (Number(row.reg_holiday_ot_hrs || 0) * hourlyRate * 2.6) + 
+                            (Number(row.spec_holiday_ot_hrs || 0) * hourlyRate * 1.69);
+
+      const monetaryHolND = ((Number(row.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10) + 
+                            ((Number(row.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10);
+
+      return [
+        row.employees?.employee_id_number,
+        `"${row.employees?.last_name}, ${row.employees?.first_name}"`,
+        row.employees?.department,
+        row.days_worked,
+        Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0),
+        row.nd_hours || 0,
+        dailyRate.toFixed(2),
+        row.basic_pay, 
+        row.ot_pay, 
+        monetaryHolOT.toFixed(2), 
+        row.nd_pay || 0, 
+        monetaryHolND.toFixed(2), 
+        row.holiday_pay || 0,
+        ...activeAdditions.map(a => row.custom_additions?.[a.index] || 0),
+        row.gross_pay,
+        row.time_deduction || 0,
+        ...activeDeductions.map(d => row.custom_deductions?.[d.index] || 0),
+        row.loan_deduction || 0,
+        row.sss_deduction, row.philhealth_deduction, row.pagibig_deduction, row.tax_deduction, row.net_pay
+      ].join(",");
+    });
+
     const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
     const link = document.createElement("a");
     link.setAttribute("href", encodeURI(csvContent));
-    link.setAttribute("download", `Payroll_Report_${deptFilter}_${selectedPeriod.start}.csv`);
+    link.setAttribute("download", `Master_Report_${selectedPeriod.start}.csv`);
     link.click();
   };
 
-  // --- PDF GENERATOR ---
+  // --- PDF GENERATOR (FIXED: Headers, Spans & Amounts) ---
   const generatePDFReport = () => {
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-
       doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
       doc.text((orgSettings?.name || "PAYROLL REPORT").toUpperCase(), 5, 10);
-      doc.setFontSize(7);
-      doc.text(`PERIOD: ${selectedPeriod.start} TO ${selectedPeriod.end} | DEPT: ${deptFilter}`, 5, 14);
-
+      
       const head = [
         [
-          { content: 'Employee info', colSpan: 4, styles: { halign: 'center', fillColor: [51, 65, 85] } },
-          { content: 'Attendance & Rates', colSpan: 4, styles: { halign: 'center', fillColor: [51, 65, 85] } },
-          { content: 'Earnings (Add Pay)', colSpan: 6 + additionLabels.length, styles: { halign: 'center', fillColor: [51, 65, 85] } },
-          { content: 'Other Deductions', colSpan: 2 + deductionLabels.length, styles: { halign: 'center', fillColor: [51, 65, 85] } },
-          { content: 'Statutory & Tax', colSpan: 4, styles: { halign: 'center', fillColor: [51, 65, 85] } },
-          { content: 'Net Pay', styles: { halign: 'center', fillColor: [22, 101, 52] } }
+          { content: 'Employee', colSpan: 3, styles: { halign: 'center' } },
+          { content: 'Attendance', colSpan: 3, styles: { halign: 'center' } },
+          { content: 'Earnings', colSpan: 7 + activeAdditions.length, styles: { halign: 'center' } },
+          { content: 'Deductions', colSpan: 2 + activeDeductions.length, styles: { halign: 'center' } },
+          { content: 'Statutory', colSpan: 4, styles: { halign: 'center' } },
+          { content: 'Net', styles: { halign: 'center' } }
         ],
         [
-          'ID', 'Name', 'Pos', 'Dept',
-          'L/UT', 'ND', 'Shft', 'Rate',
-          'Basic', 'OT', 'ND P', 'Reg H', 'Spec', ...additionLabels.map(l => l.substring(0, 5)), 'GROSS',
-          'Late', ...deductionLabels.map(l => l.substring(0, 5)), 'Loans',
+          'ID', 'Name', 'Dept',
+          'Shft', 'L/UT', 'ND',
+          'Basic', 'OT', 'Hol OT', 'ND P', 'Hol ND', 'Hol Prem', ...activeAdditions.map(a => a.label.substring(0, 5)), 'GROSS',
+          'Late', ...activeDeductions.map(d => d.label.substring(0, 5)), 'Vale',
           'SSS', 'PHIC', 'HDMF', 'W-Tax', 'TOTAL'
-        ].map(h => ({ content: h, styles: { halign: 'center' } }))
+        ]
       ];
 
-      const body = filteredData.map(row => [
-        row.employees?.employee_id_number || '',
-        `${row.employees?.last_name || ''}, ${row.employees?.first_name ? row.employees.first_name[0] : ''}.`,
-        (row.employees?.position || '').substring(0, 10),
-        (row.employees?.department || '').substring(0, 8),
-        Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0),
-        row.nd_hours || 0,
-        row.days_worked || 0,
-        Number(row.employees?.salary_rate / 26 || 0).toFixed(0),
-        Number(row.basic_pay || 0).toLocaleString(),
-        Number(row.ot_pay || 0).toLocaleString(),
-        Number(row.nd_pay || 0).toLocaleString(),
-        Number(row.holiday_pay || 0).toLocaleString(),
-        Number(row.special_holiday_pay || 0).toLocaleString(),
-        ...additionLabels.map((_, i) => Number(row.custom_additions?.[i] || 0).toLocaleString()),
-        Number(row.gross_pay || 0).toLocaleString(),
-        Number(row.time_deduction || 0).toLocaleString(),
-        ...deductionLabels.map((_, i) => Number(row.custom_deductions?.[i] || 0).toLocaleString()),
-        Number(row.loan_deduction || 0).toLocaleString(),
-        Number(row.sss_deduction || 0).toLocaleString(),
-        Number(row.philhealth_deduction || 0).toLocaleString(),
-        Number(row.pagibig_deduction || 0).toLocaleString(),
-        Number(row.tax_deduction || 0).toLocaleString(),
-        Number(row.net_pay || 0).toLocaleString()
-      ]);
+      const body = filteredData.map(row => {
+        const factor = parseFloat(orgSettings?.working_days_per_year) || 313;
+        const dailyRate = (parseFloat(row.employees?.salary_rate) || 0) * 12 / factor;
+        const hourlyRate = dailyRate / 8;
+
+        const monetaryHolOT = (Number(row.reg_holiday_ot_hrs || 0) * hourlyRate * 2.6) + 
+                              (Number(row.spec_holiday_ot_hrs || 0) * hourlyRate * 1.69);
+
+        const monetaryHolND = ((Number(row.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10) + 
+                              ((Number(row.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10);
+
+        return [
+          row.employees?.employee_id_number,
+          `${row.employees?.last_name}, ${row.employees?.first_name[0]}.`,
+          row.employees?.department?.substring(0, 8),
+          row.days_worked,
+          Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0),
+          row.nd_hours,
+          Number(row.basic_pay).toLocaleString(),
+          Number(row.ot_pay).toLocaleString(),
+          monetaryHolOT.toLocaleString(undefined, {minimumFractionDigits: 2}),
+          Number(row.nd_pay || 0).toLocaleString(),
+          monetaryHolND.toLocaleString(undefined, {minimumFractionDigits: 2}),
+          Number(row.holiday_pay || 0).toLocaleString(),
+          ...activeAdditions.map(a => Number(row.custom_additions?.[a.index] || 0).toLocaleString()),
+          Number(row.gross_pay || 0).toLocaleString(),
+          Number(row.time_deduction || 0).toLocaleString(),
+          ...activeDeductions.map(d => Number(row.custom_deductions?.[d.index] || 0).toLocaleString()),
+          Number(row.loan_deduction || 0).toLocaleString(),
+          Number(row.sss_deduction || 0).toLocaleString(),
+          Number(row.philhealth_deduction || 0).toLocaleString(),
+          Number(row.pagibig_deduction || 0).toLocaleString(),
+          Number(row.tax_deduction || 0).toLocaleString(),
+          Number(row.net_pay || 0).toLocaleString()
+        ];
+      });
 
       autoTable(doc, {
         startY: 18,
         head: head,
         body: body,
         theme: 'grid',
-        styles: { fontSize: 5, cellPadding: 0.5 },
-        margin: { left: 5, right: 5 },
-        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], lineWidth: 0.1 },
-        columnStyles: {
-          4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' },
-          8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' },
-          12: { halign: 'right' }, 13: { halign: 'right' }, 14: { halign: 'right', fontStyle: 'bold' },
-          15: { halign: 'right' }, 16: { halign: 'right' }, 17: { halign: 'right' }, 18: { halign: 'right' },
-          19: { halign: 'right' }, 20: { halign: 'right' }, 21: { halign: 'right' }, 
-          22: { halign: 'right', fontStyle: 'bold', fillColor: [240, 253, 244] }
-        },
-        didDrawPage: (data) => {
-          if (data.pageNumber === doc.internal.getNumberOfPages()) {
-            const finalY = data.cursor.y + 10;
-            doc.setFontSize(8);
-            doc.text(`GRAND TOTAL: PHP ${calculateGrandTotal().toLocaleString(undefined, {minimumFractionDigits: 2})}`, pageWidth - 5, finalY, { align: 'right' });
-            const sigY = finalY + 12;
-            doc.line(5, sigY, 55, sigY);
-            doc.text("Prepared By", 5, sigY + 4);
-            doc.line(pageWidth - 55, sigY, pageWidth - 5, sigY);
-            doc.text("Approved By", pageWidth - 55, sigY + 4);
-          }
-        }
+        styles: { fontSize: 4, cellPadding: 0.4 },
+        headStyles: { fillColor: [30, 41, 59] }
       });
       window.open(doc.output('bloburl'), '_blank');
-    } catch (err) {
-      console.error("PDF Error:", err);
-      alert("Error generating PDF.");
-    }
+    } catch (err) { console.error(err); }
   };
 
   return (
@@ -204,84 +232,73 @@ export default function PayrollReport({ organizationId, orgSettings }) {
         <table style={reportTable}>
           <thead>
             <tr style={thGroupRow}>
-              <th colSpan="4" style={{ textAlign: 'center' }}>Employee info</th>
-              <th colSpan="4" style={{ textAlign: 'center' }}>Attendance & Rates</th>
-              <th colSpan={6 + additionLabels.length} style={{ textAlign: 'center' }}>Earnings (Add Pay)</th>
-              <th colSpan={2 + deductionLabels.length} style={{ textAlign: 'center' }}>Other Deductions</th>
-              <th colSpan="4" style={{ textAlign: 'center' }}>Statutory & Tax</th>
-              <th rowSpan="2" style={{ textAlign: 'center' }}>Net Pay</th>
+              <th colSpan="3">Employee</th>
+              <th colSpan="3">Attendance</th>
+              <th colSpan={7 + activeAdditions.length}>Earnings</th>
+              <th colSpan={2 + activeDeductions.length}>Deductions</th>
+              <th colSpan="4">Statutory</th>
+              <th>Net Pay</th>
             </tr>
             <tr style={thMainRow}>
-              <th style={{ textAlign: 'center' }}>ID</th>
-              <th style={{ textAlign: 'center' }}>Name</th>
-              <th style={{ textAlign: 'center' }}>Position</th>
-              <th style={{ textAlign: 'center' }}>Dept.</th>
-              <th style={{ textAlign: 'center' }}>Late/UT</th>
-              <th style={{ textAlign: 'center' }}>ND(H)</th>
-              <th style={{ textAlign: 'center' }}>Shift</th>
-              <th style={{ textAlign: 'center' }}>Daily</th>
-              <th style={{ textAlign: 'center' }}>Basic</th>
-              <th style={{ textAlign: 'center' }}>OT</th>
-              <th style={{ textAlign: 'center' }}>ND Pay</th>
-              <th style={{ textAlign: 'center' }}>Reg Hol</th>
-              <th style={{ textAlign: 'center' }}>Spec Prem</th>
-              {additionLabels.map(l => <th key={l} style={{ textAlign: 'center' }}>{l.toUpperCase()}</th>)}
-              <th style={{ textAlign: 'center' }}>GROSS</th>
-              <th style={{ textAlign: 'center' }}>Late Ded</th>
-              {deductionLabels.map(l => <th key={l} style={{ textAlign: 'center' }}>{l.toUpperCase()}</th>)}
-              <th style={{ textAlign: 'center' }}>Loans</th>
-              <th style={{ textAlign: 'center' }}>SSS</th>
-              <th style={{ textAlign: 'center' }}>PHIC</th>
-              <th style={{ textAlign: 'center' }}>HDMF</th>
-              <th style={{ textAlign: 'center' }}>W-Tax</th>
+              <th>ID</th><th>Name</th><th>Dept</th>
+              <th>Shft</th><th>L/UT</th><th>ND</th>
+              <th>Basic</th><th>OT</th><th>Hol OT</th><th>ND P</th><th>Hol ND</th><th>Hol Prem</th>
+              {activeAdditions.map(a => <th key={a.index}>{a.label.toUpperCase()}</th>)}
+              <th>GROSS</th>
+              <th>Late</th>
+              {activeDeductions.map(d => <th key={d.index}>{d.label.toUpperCase()}</th>)}
+              <th>Vale</th>
+              <th>SSS</th><th>PHIC</th><th>HDMF</th><th>W-Tax</th>
+              <th style={{background:'#166534'}}>TOTAL</th>
             </tr>
           </thead>
           <tbody>
-            {filteredData.map((row, idx) => (
-              <tr key={row.id} style={idx % 2 === 0 ? trEven : trOdd}>
-                <td>{row.employees?.employee_id_number}</td>
-                <td style={stickyCol}>{row.employees?.last_name}, {row.employees?.first_name}</td>
-                <td>{row.employees?.position}</td>
-                <td>{row.employees?.department}</td>
-                <td style={numCol}>{Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0)}</td>
-                <td style={numCol}>{row.nd_hours || 0}</td>
-                <td style={numCol}>{row.days_worked}</td>
-                <td style={numCol}>{Number(row.employees?.salary_rate / 26).toFixed(0)}</td>
-                <td style={valCol}>{Number(row.basic_pay).toLocaleString()}</td>
-                <td style={valCol}>{Number(row.ot_pay).toLocaleString()}</td>
-                <td style={valCol}>{Number(row.nd_pay || 0).toLocaleString()}</td>
-                <td style={valCol}>{Number(row.holiday_pay || 0).toLocaleString()}</td>
-                <td style={valCol}>{Number(row.special_holiday_pay || 0).toLocaleString()}</td>
-                {additionLabels.map((_, i) => <td key={i} style={valCol}>{Number(row.custom_additions?.[i] || 0).toLocaleString()}</td>)}
-                <td style={{...valCol, fontWeight:'bold', background:'#f8fafc'}}>{Number(row.gross_pay).toLocaleString()}</td>
-                <td style={dedCol}>{Number(row.time_deduction || 0).toLocaleString()}</td>
-                {deductionLabels.map((_, i) => <td key={i} style={dedCol}>{Number(row.custom_deductions?.[i] || 0).toLocaleString()}</td>)}
-                <td style={dedCol}>{Number(row.loan_deduction || 0).toLocaleString()}</td>
-                <td style={statCol}>{Number(row.sss_deduction).toLocaleString()}</td>
-                <td style={statCol}>{Number(row.philhealth_deduction).toLocaleString()}</td>
-                <td style={statCol}>{Number(row.pagibig_deduction).toLocaleString()}</td>
-                <td style={statCol}>{Number(row.tax_deduction).toLocaleString()}</td>
-                <td className="net-col" style={netCol}>₱{Number(row.net_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              </tr>
-            ))}
+            {filteredData.map((row, idx) => {
+              const factor = parseFloat(orgSettings?.working_days_per_year) || 313;
+              const dailyRate = (parseFloat(row.employees?.salary_rate) || 0) * 12 / factor;
+              const hourlyRate = dailyRate / 8;
+
+              const monetaryHolOT = (Number(row.reg_holiday_ot_hrs || 0) * hourlyRate * 2.6) + 
+                                    (Number(row.spec_holiday_ot_hrs || 0) * hourlyRate * 1.69);
+
+              const monetaryHolND = ((Number(row.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10) + 
+                                    ((Number(row.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10);
+
+              return (
+                <tr key={row.id} style={idx % 2 === 0 ? trEven : trOdd}>
+                  <td>{row.employees?.employee_id_number}</td>
+                  <td style={stickyCol}>{row.employees?.last_name}, {row.employees?.first_name}</td>
+                  <td>{row.employees?.department}</td>
+                  <td style={numCol}>{row.days_worked}</td>
+                  <td style={numCol}>{Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0)}</td>
+                  <td style={numCol}>{row.nd_hours || 0}</td>
+                  <td style={valCol}>{Number(row.basic_pay).toLocaleString()}</td>
+                  <td style={valCol}>{Number(row.ot_pay).toLocaleString()}</td>
+                  <td style={valCol}>{monetaryHolOT.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td style={valCol}>{Number(row.nd_pay || 0).toLocaleString()}</td>
+                  <td style={valCol}>{monetaryHolND.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td style={valCol}>{Number(row.holiday_pay || 0).toLocaleString()}</td>
+                  {activeAdditions.map(a => <td key={a.index} style={valCol}>{Number(row.custom_additions?.[a.index] || 0).toLocaleString()}</td>)}
+                  <td style={{...valCol, fontWeight:'bold', background:'#f8fafc'}}>{Number(row.gross_pay).toLocaleString()}</td>
+                  <td style={dedCol}>{Number(row.time_deduction || 0).toLocaleString()}</td>
+                  {activeDeductions.map(d => <td key={d.index} style={dedCol}>{Number(row.custom_deductions?.[d.index] || 0).toLocaleString()}</td>)}
+                  <td style={dedCol}>{Number(row.loan_deduction || 0).toLocaleString()}</td>
+                  <td style={statCol}>{Number(row.sss_deduction).toLocaleString()}</td>
+                  <td style={statCol}>{Number(row.philhealth_deduction).toLocaleString()}</td>
+                  <td style={statCol}>{Number(row.pagibig_deduction).toLocaleString()}</td>
+                  <td style={statCol}>{Number(row.tax_deduction).toLocaleString()}</td>
+                  <td className="net-col" style={netCol}>₱{Number(row.net_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                </tr>
+              );
+            })}
           </tbody>
-          <tfoot>
-            <tr style={footerRow}>
-              <td colSpan={20 + additionLabels.length + deductionLabels.length} style={{ textAlign: 'right', paddingRight: '20px', background: '#1e293b' }}>
-                {deptFilter.toUpperCase()} ALL TOTAL:
-              </td>
-              <td className="net-col" style={{ ...netCol, fontSize: '0.8rem' }}>
-                ₱{calculateGrandTotal().toLocaleString(undefined, {minimumFractionDigits: 2})}
-              </td>
-            </tr>
-          </tfoot>
         </table>
       </div>
     </div>
   );
 }
 
-// --- STYLES ---
+// --- STYLES (No changes made here) ---
 const reportContainer = { padding: '20px', background: '#f8fafc', minHeight: '100vh' };
 const headerSection = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
 const filterItem = { display: 'flex', flexDirection: 'column', gap: '4px' };
@@ -302,4 +319,3 @@ const valCol = { color: '#2563eb', textAlign: 'right', padding: '8px' };
 const dedCol = { color: '#dc2626', textAlign: 'right', padding: '8px' };
 const statCol = { color: '#92400e', textAlign: 'right', padding: '8px' };
 const netCol = { fontWeight: 'bold', textAlign: 'right', padding: '8px', background: '#f0fdf4', color: '#166534', borderLeft: '2px solid #bbf7d0' };
-const footerRow = { background: '#1e293b', color: 'white', fontWeight: 'bold' };

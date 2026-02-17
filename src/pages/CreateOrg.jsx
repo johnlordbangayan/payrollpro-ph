@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 export default function CreateOrg({ onCancel, onSuccess }) {
-  const { user } = useAuth();
+  // --- ADDED refreshOrgs HERE ---
+  const { user, refreshOrgs } = useAuth(); 
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -15,7 +16,6 @@ export default function CreateOrg({ onCancel, onSuccess }) {
 
     try {
       // 1. Insert the Organization
-      // We use .select() to get the ID back immediately
       const { data: org, error: orgError } = await supabase
         .from('organizations')
         .insert([{ name: name.trim() }])
@@ -25,12 +25,11 @@ export default function CreateOrg({ onCancel, onSuccess }) {
       if (orgError) {
         console.error("Org Creation Error:", orgError);
         alert(orgError.message);
-        return; // This will trigger the 'finally' block
+        setLoading(false);
+        return; 
       }
 
-      // 2. Link the member
-      // We don't 'await' this strictly to avoid a second hang point
-      // If the org was created, we move fast.
+      // 2. Link the user as the Owner
       const { error: memberError } = await supabase
         .from('organization_members')
         .insert([{
@@ -43,60 +42,64 @@ export default function CreateOrg({ onCancel, onSuccess }) {
         console.error("Member Link Error:", memberError);
       }
 
+      // --- CRITICAL FIX: Refresh the AuthContext list before calling onSuccess ---
+      if (refreshOrgs) {
+        await refreshOrgs(); 
+      }
+
       // 3. SUCCESS NAVIGATION
-      // We call onSuccess() immediately after the attempts.
       onSuccess();
       
     } catch (err) {
-      // This catches CSP violations or network interruptions
       console.error("Critical Failure in CreateOrg:", err);
-      alert("An unexpected error occurred. Please check your connection.");
+      alert("An unexpected error occurred.");
     } finally {
-      // CRITICAL: This kills the 'Creating...' state even if the script crashed
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc', fontFamily: 'sans-serif' }}>
-      <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', width: '100%', maxWidth: '400px' }}>
-        <h2 style={{ textAlign: 'center', color: '#1e293b' }}>Create Organization</h2>
-        <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '24px' }}>Set up your workspace to get started.</p>
+    <div style={containerStyle}>
+      <div style={cardStyle}>
+        <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: '10px' }}>🏢</div>
+        <h2 style={{ textAlign: 'center', color: '#1e293b', marginTop: 0 }}>Create Organization</h2>
+        <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '24px', fontSize: '0.9rem' }}>
+          Enter your company name to set up your payroll workspace.
+        </p>
 
         <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <input
-            type="text"
-            placeholder="Company Name (e.g. GJ SAVE OIL INC.)"
-            required
-            disabled={loading}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569' }}>Company Name</label>
+            <input
+              type="text"
+              placeholder="e.g. GJ SAVE OIL INC."
+              required
+              disabled={loading}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
 
           <button
             type="submit"
             disabled={loading}
             style={{ 
-              padding: '14px', 
-              backgroundColor: loading ? '#94a3b8' : '#16a34a', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '8px', 
+              ...buttonStyle,
+              backgroundColor: loading ? '#94a3b8' : '#3b82f6',
               cursor: loading ? 'not-allowed' : 'pointer', 
-              fontWeight: 'bold' 
             }}
           >
-            {loading ? 'Creating Workspace...' : '🚀 Start 15-Day Free Trial'}
+            {loading ? 'Creating Workspace...' : 'Create Workspace'}
           </button>
 
           {!loading && (
             <button
               type="button"
               onClick={onCancel}
-              style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', textDecoration: 'underline' }}
+              style={cancelButtonStyle}
             >
-              Cancel
+              Back to selection
             </button>
           )}
         </form>
@@ -104,3 +107,10 @@ export default function CreateOrg({ onCancel, onSuccess }) {
     </div>
   );
 }
+
+// --- STYLES (Unchanged) ---
+const containerStyle = { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f1f5f9', fontFamily: 'Inter, system-ui, sans-serif' };
+const cardStyle = { backgroundColor: 'white', padding: '40px', borderRadius: '24px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)', width: '100%', maxWidth: '420px' };
+const inputStyle = { width: '100%', padding: '12px 16px', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '1rem', outlineColor: '#3b82f6' };
+const buttonStyle = { padding: '14px', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '1rem', transition: 'all 0.2s', marginTop: '10px' };
+const cancelButtonStyle = { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.9rem', marginTop: '10px', fontWeight: '500' };

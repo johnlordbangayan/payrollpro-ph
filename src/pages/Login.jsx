@@ -1,90 +1,88 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
-export default function Login() {
+export default function LandingPage({ onSignUpClick }) {
+  const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
 
-  // 1. CLEAR STALE ORG DATA ON LANDING
-  // If the user is on the login page, they shouldn't have an 'activeOrg' saved.
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        localStorage.removeItem('activeOrg'); //
-      }
-    };
-    checkSession();
-  }, []);
-
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-
-    try {
-      // 2. Clear any old org data right before trying to log in
-      localStorage.removeItem('activeOrg'); //
-
-      const { error } = isSignUp 
-        ? await supabase.auth.signUp({ email, password })
-        : await supabase.auth.signInWithPassword({ email, password });
-
-      if (error) {
-        console.error("Auth Error:", error.message);
-        alert(error.message);
-      } else if (isSignUp) {
-        alert("Registration successful! Check your email.");
-      }
-    } catch (err) {
-      console.error("Critical Auth Failure:", err);
-    } finally {
-      setLoading(false);
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert(error.message);
+    setLoading(false);
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f8fafc', fontFamily: 'sans-serif' }}>
-      <form onSubmit={handleSubmit} style={{ background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', width: '320px' }}>
-        <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>{isSignUp ? 'Create Account' : 'Welcome Back'}</h2>
-        
-        <input 
-          type="email" 
-          placeholder="Email" 
-          required 
-          value={email} 
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-          style={{ width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', boxSizing: 'border-box' }} 
-        />
-        
-        <input 
-          type="password" 
-          placeholder="Password" 
-          required 
-          value={password} 
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          style={{ width: '100%', padding: '10px', marginBottom: '20px', borderRadius: '6px', border: '1px solid #e2e8f0', boxSizing: 'border-box' }} 
-        />
+    <div style={lpContainer}>
+      {/* NAVIGATION BAR */}
+      <nav style={lpNav}>
+        <div style={lpLogo}>Payroll<span style={{color:'#3b82f6'}}>Pro</span></div>
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', position: 'relative' }}>
+          <button onClick={() => setShowLoginPopup(!showLoginPopup)} style={lpLoginBtn}>Log In</button>
+          <button onClick={onSignUpClick} style={lpSignUpBtn}>Sign Up Free</button>
 
-        <button 
-          type="submit" 
-          disabled={loading} 
-          style={{ width: '100%', padding: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          {loading ? 'Processing...' : (isSignUp ? 'Sign Up' : 'Login')}
-        </button>
+          {/* MINI LOGIN POPUP */}
+          {showLoginPopup && (
+            <div style={miniPopup}>
+              <h4 style={{marginTop: 0}}>Member Login</h4>
+              <form onSubmit={handleLogin} style={popupForm}>
+                <input type="email" placeholder="Email" style={lpInput} onChange={e=>setEmail(e.target.value)} required />
+                <input type="password" placeholder="Password" style={lpInput} onChange={e=>setPassword(e.target.value)} required />
+                <button type="submit" style={lpSubmitBtn}>{loading ? '...' : 'Sign In'}</button>
+              </form>
+            </div>
+          )}
+        </div>
+      </nav>
 
-        <button 
-          type="button"
-          onClick={() => setIsSignUp(!isSignUp)} 
-          style={{ width: '100%', background: 'none', border: 'none', textAlign: 'center', marginTop: '15px', color: '#64748b', fontSize: '0.85rem', cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          {isSignUp ? 'Already have an account? Login' : 'Need an account? Sign Up'}
-        </button>
-      </form>
+      {/* HERO SECTION */}
+      <header style={heroSection}>
+        <h1>Philippines' Simple <br/><span style={{color: '#3b82f6'}}>Payroll Solution</span></h1>
+        <p>Automated SSS, PhilHealth, Pag-IBIG. 100% compliant. 0% headache.</p>
+        <button onClick={onSignUpClick} style={mainCta}>Start 10-Day Free Trial</button>
+      </header>
+
+      {/* PRICING SECTION */}
+      <section style={pricingSection}>
+        <h2>Affordable Plans for Every Business</h2>
+        <div style={pricingGrid}>
+          <PriceCard title="Monthly" price="₱599" note="/month" />
+          <PriceCard title="Annual" price="₱3,000" note="/year" highlight={true} />
+          <PriceCard title="Lifetime" price="₱5,000" note="One-time" />
+        </div>
+      </section>
     </div>
   );
 }
+
+// Small helper component for pricing
+const PriceCard = ({ title, price, note, highlight }) => (
+  <div style={{...pCard, border: highlight ? '2px solid #3b82f6' : '1px solid #e2e8f0'}}>
+    <h3>{title}</h3>
+    <div style={pPrice}>{price}</div>
+    <div style={pNote}>{note}</div>
+    <button style={pBtn}>Choose Plan</button>
+  </div>
+);
+
+// STYLES
+const lpContainer = { fontFamily: 'Inter, sans-serif', color: '#1e293b' };
+const lpNav = { display: 'flex', justifyContent: 'space-between', padding: '20px 50px', alignItems: 'center', background: 'white', borderBottom: '1px solid #f1f5f9' };
+const lpLogo = { fontSize: '1.5rem', fontWeight: '900' };
+const lpLoginBtn = { background: 'none', border: 'none', fontWeight: 'bold', color: '#64748b', cursor: 'pointer' };
+const lpSignUpBtn = { background: '#1e293b', color: 'white', padding: '10px 20px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer' };
+const miniPopup = { position: 'absolute', top: '50px', right: 0, background: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', width: '250px', zIndex: 1000, border: '1px solid #e2e8f0' };
+const popupForm = { display: 'flex', flexDirection: 'column', gap: '10px' };
+const lpInput = { padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1' };
+const lpSubmitBtn = { background: '#3b82f6', color: 'white', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' };
+const heroSection = { textAlign: 'center', padding: '100px 20px', background: 'linear-gradient(to bottom, #ffffff, #f8fafc)' };
+const mainCta = { marginTop: '30px', padding: '15px 40px', fontSize: '1.1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '50px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)' };
+const pricingSection = { padding: '80px 50px', textAlign: 'center' };
+const pricingGrid = { display: 'flex', justifyContent: 'center', gap: '30px', marginTop: '50px', flexWrap: 'wrap' };
+const pCard = { background: 'white', padding: '40px', borderRadius: '16px', width: '280px', textAlign: 'center' };
+const pPrice = { fontSize: '2.5rem', fontWeight: 'bold', margin: '10px 0' };
+const pNote = { color: '#64748b', marginBottom: '20px' };
+const pBtn = { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #3b82f6', color: '#3b82f6', background: 'white', fontWeight: 'bold', cursor: 'pointer' };
