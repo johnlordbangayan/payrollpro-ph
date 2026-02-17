@@ -52,7 +52,7 @@ export default function UserProfile({ user, onLogout, onBack }) {
   const handleContactSupport = () => {
     const subject = `Payment Proof - ${user.email}`;
     const body = `Hi Admin,\n\nI have paid for a subscription. Attached is my receipt.\n\nMy Email: ${user.email}`;
-    window.location.href = `mailto:support@payrollpro.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = `mailto:support.payrollpro-ph@jlsolutions.app?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   // --- 3. CALCULATE TRIAL & STATUS ---
