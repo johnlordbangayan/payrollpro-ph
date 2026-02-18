@@ -16,6 +16,7 @@ import PayrollReport from './pages/PayrollReport';
 import MonthlyDeductions from './pages/MonthlyDeductions';
 import ThirteenthMonth from './pages/ThirteenthMonth';
 import LoanManager from './pages/LoanManager';
+import BIR1601C from './pages/BIR1601C';
 import UserProfile from './pages/UserProfile';
 
 function App() {
@@ -185,6 +186,7 @@ function App() {
                   { id: 'monthly', label: 'Monthly Ded.' },
                   { id: 'thirteenth', label: '13th Month' }, // --- NEW TAB ---
                   { id: 'holidays', label: 'Holidays' },
+                  { id: 'bir1601c', label: 'BIR 1601-C' },
                   { id: 'settings', label: 'Settings' }
                 ].map(tab => (
                   <button 
@@ -220,6 +222,7 @@ function App() {
                             {subView === 'thirteenth' && <ThirteenthMonth organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             
                             {subView === 'holidays' && <HolidayManager organizationId={activeOrg.id} />}
+                            {subView === 'bir1601c' && <BIR1601C organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             {subView === 'settings' && <OrgSettings org={activeOrg} onUpdate={setActiveOrg} />}
                         </>
                     )}
