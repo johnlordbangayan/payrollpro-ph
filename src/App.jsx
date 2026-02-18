@@ -14,6 +14,7 @@ import HolidayManager from './pages/HolidayManager';
 import OrgSettings from './pages/OrgSettings';
 import PayrollReport from './pages/PayrollReport';
 import MonthlyDeductions from './pages/MonthlyDeductions';
+import ThirteenthMonth from './ThirteenthMonth'; // Ensure this file exists in src/
 import LoanManager from './pages/LoanManager';
 import UserProfile from './pages/UserProfile';
 
@@ -89,7 +90,6 @@ function App() {
 
     checkSubscription();
 
-    // INDESTRUCTIBLE FIX: Tab Focus Auto-Recovery
     const handleFocus = () => {
       if (document.visibilityState === 'visible') {
         console.log("App Waking Up: Verifying secure connection...");
@@ -183,6 +183,7 @@ function App() {
                   { id: 'history', label: 'History' },
                   { id: 'report', label: 'Master Report' },
                   { id: 'monthly', label: 'Monthly Ded.' },
+                  { id: 'thirteenth', label: '13th Month' }, // --- NEW TAB ---
                   { id: 'holidays', label: 'Holidays' },
                   { id: 'settings', label: 'Settings' }
                 ].map(tab => (
@@ -214,6 +215,10 @@ function App() {
                             {subView === 'history' && <PayrollHistory organizationId={activeOrg.id} />}
                             {subView === 'report' && activeOrg?.deduction_labels && <PayrollReport organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             {subView === 'monthly' && <MonthlyDeductions organizationId={activeOrg.id} orgSettings={activeOrg} />}
+                            
+                            {/* --- NEW COMPONENT RENDER --- */}
+                            {subView === 'thirteenth' && <ThirteenthMonth organizationId={activeOrg.id} orgSettings={activeOrg} />}
+                            
                             {subView === 'holidays' && <HolidayManager organizationId={activeOrg.id} />}
                             {subView === 'settings' && <OrgSettings org={activeOrg} onUpdate={setActiveOrg} />}
                         </>
