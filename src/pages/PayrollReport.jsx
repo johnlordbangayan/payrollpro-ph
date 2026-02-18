@@ -72,9 +72,8 @@ export default function PayrollReport({ organizationId, orgSettings }) {
 
   const departments = ['All', ...new Set(reportData.map(r => r.employees?.department).filter(Boolean))];
   const filteredData = deptFilter === 'All' ? reportData : reportData.filter(r => r.employees?.department === deptFilter);
-  const calculateGrandTotal = () => filteredData.reduce((sum, row) => sum + Number(row.net_pay || 0), 0);
 
-  // --- CSV EXPORT (FIXED: Monetary Calculations) ---
+  // --- CSV EXPORT ---
   const exportToCSV = () => {
     if (filteredData.length === 0) return;
     
@@ -128,7 +127,7 @@ export default function PayrollReport({ organizationId, orgSettings }) {
     link.click();
   };
 
-  // --- PDF GENERATOR (FIXED: Headers, Spans & Amounts) ---
+  // --- PDF GENERATOR (UPDATED: Full First Name) ---
   const generatePDFReport = () => {
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -166,7 +165,8 @@ export default function PayrollReport({ organizationId, orgSettings }) {
 
         return [
           row.employees?.employee_id_number,
-          `${row.employees?.last_name}, ${row.employees?.first_name[0]}.`,
+          // --- UPDATED THIS LINE: Removed [0] and the period ---
+          `${row.employees?.last_name}, ${row.employees?.first_name}`,
           row.employees?.department?.substring(0, 8),
           row.days_worked,
           Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0),
@@ -298,7 +298,7 @@ export default function PayrollReport({ organizationId, orgSettings }) {
   );
 }
 
-// --- STYLES (No changes made here) ---
+// --- STYLES ---
 const reportContainer = { padding: '20px', background: '#f8fafc', minHeight: '100vh' };
 const headerSection = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
 const filterItem = { display: 'flex', flexDirection: 'column', gap: '4px' };
