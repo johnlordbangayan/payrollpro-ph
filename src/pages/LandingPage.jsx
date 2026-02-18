@@ -36,7 +36,7 @@ export default function LandingPage({ onSignUpClick }) {
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin, // Redirects back to your app after clicking email
+        redirectTo: window.location.origin,
     });
 
     if (error) {
@@ -49,7 +49,7 @@ export default function LandingPage({ onSignUpClick }) {
 
   const togglePopup = () => {
       setShowLogin(!showLogin);
-      setView('login'); // Reset to login view
+      setView('login');
       setError('');
       setSuccessMsg('');
   };
@@ -70,22 +70,18 @@ export default function LandingPage({ onSignUpClick }) {
             {/* LOGIN / FORGOT PASSWORD POPUP */}
             {showLogin && (
                 <div style={popup}>
-                    
                     {/* VIEW 1: LOGIN FORM */}
                     {view === 'login' && (
                         <>
                             <h4 style={{marginTop:0, marginBottom:'15px', color: '#0f172a'}}>Welcome Back</h4>
                             {error && <div style={errorStyle}>{error}</div>}
-                            
                             <form onSubmit={handleLogin} style={{display:'flex', flexDirection:'column', gap:'12px'}}>
                                 <input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} style={input} required />
                                 <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} style={input} required />
-                                
                                 <button type="submit" disabled={loading} style={submitBtn}>
                                     {loading ? 'Logging in...' : 'Access Dashboard'}
                                 </button>
                             </form>
-                            
                             <div style={{marginTop: '15px', textAlign: 'center'}}>
                                 <button onClick={() => { setView('forgot'); setError(''); }} style={linkBtn}>
                                     Forgot Password?
@@ -101,18 +97,14 @@ export default function LandingPage({ onSignUpClick }) {
                             <p style={{fontSize: '0.85rem', color: '#64748b', marginBottom: '15px', lineHeight: '1.4'}}>
                                 Enter your email and we'll send you a link to reset your password.
                             </p>
-                            
                             {error && <div style={errorStyle}>{error}</div>}
                             {successMsg && <div style={successStyle}>{successMsg}</div>}
-
                             <form onSubmit={handleForgotPassword} style={{display:'flex', flexDirection:'column', gap:'12px'}}>
                                 <input type="email" placeholder="Enter your email" value={email} onChange={e=>setEmail(e.target.value)} style={input} required />
-                                
                                 <button type="submit" disabled={loading} style={{...submitBtn, background: successMsg ? '#16a34a' : '#2563eb'}}>
                                     {loading ? 'Sending...' : successMsg ? 'Email Sent' : 'Send Reset Link'}
                                 </button>
                             </form>
-
                             <div style={{marginTop: '15px', textAlign: 'center'}}>
                                 <button onClick={() => { setView('login'); setError(''); setSuccessMsg(''); }} style={linkBtn}>
                                     ← Back to Log In
@@ -120,7 +112,6 @@ export default function LandingPage({ onSignUpClick }) {
                             </div>
                         </>
                     )}
-
                 </div>
             )}
         </div>
@@ -144,7 +135,7 @@ export default function LandingPage({ onSignUpClick }) {
         </div>
       </section>
 
-      {/* --- THE "BIG 3" FEATURES --- */}
+      {/* --- CORE FEATURES --- */}
       <section style={{ background: '#f8fafc', padding: '80px 20px' }}>
         <div style={{ maxWidth: '1100px', margin: 'auto' }}>
             <div style={{ textAlign: 'center', marginBottom: '60px' }}>
@@ -155,16 +146,21 @@ export default function LandingPage({ onSignUpClick }) {
             <div style={gridContainer}>
                 <FeatureCard 
                     icon="📊" 
-                    title="Auto-Compute Government Deductions" 
-                    desc="Never guess the contribution table again. We automatically calculate SSS, PhilHealth, and Pag-IBIG based on the latest 2026 mandates." 
+                    title="Auto-Compute Deductions" 
+                    desc="Never guess the contribution table again. We automatically calculate SSS, PhilHealth, and Pag-IBIG based on 2026 mandates." 
                 />
                 <FeatureCard 
                     icon="📒" 
                     title="Automated 'Vale' Ledger" 
-                    desc="The killer feature for PH businesses. Track employee cash advances and automatically deduct installments from their salary every cutoff." 
+                    desc="Track employee cash advances and automatically deduct installments from their salary every cutoff. No more manual tracking." 
                     highlight
                 />
                 <FeatureCard 
+                    icon="🎄" 
+                    title="1-Click 13th Month Pay" 
+                    desc="Don't panic in December. We track total basic salary throughout the year to auto-compute pro-rated 13th month pay instantly." 
+                />
+                 <FeatureCard 
                     icon="🗓️" 
                     title="Smart Holiday Pay" 
                     desc="Regular Holiday or Special Non-Working? We handle the 100%, 30%, and overtime premiums automatically." 
@@ -173,36 +169,44 @@ export default function LandingPage({ onSignUpClick }) {
         </div>
       </section>
 
-      {/* --- WHY CHOOSE US (SECONDARY FEATURES) --- */}
-      <section style={{ padding: '80px 20px', background: 'white' }}>
+      {/* --- NEW: MIGRATION & IMPORT SECTION --- */}
+      <section style={{ padding: '80px 20px', background: 'white', borderTop:'1px solid #f1f5f9' }}>
         <div style={{ maxWidth: '1000px', margin: 'auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '50px' }}>
-            <div style={{ flex: '1 1 400px' }}>
-                <h2 style={{ fontSize: '2rem', fontWeight: '800', marginBottom: '20px', lineHeight: '1.2' }}>Built for Flexible Work Weeks</h2>
+            <div style={{ flex: '1 1 450px' }}>
+                <div style={{display:'inline-block', background:'#eff6ff', color:'#2563eb', fontWeight:'bold', fontSize:'0.8rem', padding:'4px 12px', borderRadius:'20px', marginBottom:'15px'}}>FAST ONBOARDING</div>
+                <h2 style={{ fontSize: '2rem', fontWeight: '800', marginBottom: '20px', lineHeight: '1.2' }}>Move from Excel in Minutes, Not Days</h2>
                 <p style={{ color: '#64748b', lineHeight: '1.6', marginBottom: '30px' }}>
-                    Most apps assume a corporate 5-day schedule. We support the <strong>6-Day Work Week (313 Factor)</strong> out of the box—perfect for retail, construction, and service businesses.
+                    Already have employee data? Don't type them one by one. We support bulk imports to get you started immediately.
                 </p>
-                <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                    <CheckItem text="One-click Master Payroll Report export" />
-                    <CheckItem text="Individual PDF Payslips for employees" />
-                    <CheckItem text="Custom Non-Taxable Allowances" />
-                </ul>
+                <div style={{display:'grid', gap:'15px'}}>
+                    <div style={miniCard}>
+                        <div style={miniIcon}>📂</div>
+                        <div>
+                            <div style={{fontWeight:'bold'}}>Bulk Employee Import</div>
+                            <div style={{fontSize:'0.9rem', color:'#64748b'}}>Upload your CSV list of employees to create profiles instantly.</div>
+                        </div>
+                    </div>
+                    <div style={miniCard}>
+                        <div style={miniIcon}>⏱️</div>
+                        <div>
+                            <div style={{fontWeight:'bold'}}>Import Attendance Logs</div>
+                            <div style={{fontSize:'0.9rem', color:'#64748b'}}>Upload time logs (CSV) to auto-fill days worked, lates, and overtime for faster payroll processing.</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div style={{ flex: '1 1 400px', background: '#eff6ff', padding: '40px', borderRadius: '24px', border: '1px solid #dbeafe' }}>
-                <div style={{ fontWeight: 'bold', color: '#1e40af', marginBottom: '10px' }}>LOAN LEDGER EXAMPLE</div>
-                <div style={{ background: 'white', padding: '15px', borderRadius: '8px', marginBottom: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontSize: '0.9rem' }}>
-                    <div style={{display:'flex', justifyContent:'space-between'}}>
-                        <span>Loan Amount:</span>
-                        <strong>₱5,000.00</strong>
+            
+            {/* Visual Representation of Import */}
+            <div style={{ flex: '1 1 400px', display:'flex', justifyContent:'center' }}>
+                <div style={{ background: '#f8fafc', padding: '30px', borderRadius: '20px', border: '2px dashed #cbd5e1', width:'100%', textAlign:'center' }}>
+                    <div style={{fontSize:'3rem', marginBottom:'10px'}}>📄 ➔ 🚀</div>
+                    <div style={{fontWeight:'bold', color:'#334155'}}>Drag & Drop CSV</div>
+                    <div style={{fontSize:'0.8rem', color:'#94a3b8', marginTop:'5px'}}>Compatible with Excel & Google Sheets exports</div>
+                    <div style={{marginTop:'20px', background:'white', padding:'10px', borderRadius:'8px', border:'1px solid #e2e8f0', textAlign:'left', fontSize:'0.8rem', color:'#64748b'}}>
+                        <div>✅ Juan Dela Cruz (Imported)</div>
+                        <div style={{marginTop:'5px'}}>✅ Maria Santos (Imported)</div>
+                        <div style={{marginTop:'5px'}}>✅ Jose Rizal (Imported)</div>
                     </div>
-                </div>
-                <div style={{ background: 'white', padding: '15px', borderRadius: '8px', marginBottom: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', fontSize: '0.9rem' }}>
-                    <div style={{display:'flex', justifyContent:'space-between'}}>
-                        <span>Deduction per Cutoff:</span>
-                        <strong style={{color:'#ef4444'}}>-₱500.00</strong>
-                    </div>
-                </div>
-                <div style={{ background: '#dcfce7', padding: '15px', borderRadius: '8px', color: '#166534', fontSize: '0.9rem', fontWeight: 'bold', textAlign: 'center' }}>
-                    Auto-applied to next payslip
                 </div>
             </div>
         </div>
@@ -223,6 +227,18 @@ export default function LandingPage({ onSignUpClick }) {
       {/* --- FOOTER --- */}
       <footer style={{ background: '#0f172a', color: '#94a3b8', padding: '60px 20px', textAlign: 'center', fontSize: '0.9rem' }}>
         <div style={{ marginBottom: '20px', color: 'white', fontWeight: 'bold', fontSize: '1.2rem' }}>PayrollPro PH</div>
+        
+        {/* SUPPORT SECTION */}
+        <div style={{ marginBottom: '30px' }}>
+            <p style={{ marginBottom: '10px' }}>Need help or have questions?</p>
+            <a 
+                href="mailto:support.payrollpro-ph@jlsolutions.app" 
+                style={{ color: '#3b82f6', textDecoration: 'none', fontSize: '1rem', fontWeight: 'bold' }}
+            >
+                support.payrollpro-ph@jlsolutions.app
+            </a>
+        </div>
+
         <p>&copy; {new Date().getFullYear()} PayrollPro Philippines. All rights reserved.</p>
       </footer>
     </div>
@@ -269,12 +285,6 @@ const PriceCard = ({ title, price, sub, desc, highlight, badge }) => (
     </div>
 );
 
-const CheckItem = ({ text }) => (
-    <li style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1rem', color: '#334155' }}>
-        <span style={{ color: '#2563eb', fontWeight: 'bold' }}>✓</span> {text}
-    </li>
-);
-
 // --- STYLES ---
 const header = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 5%', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)', borderBottom: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 100 };
 const logo = { fontWeight: '900', fontSize: '1.5rem', color: '#0f172a', letterSpacing: '-0.5px' };
@@ -293,3 +303,6 @@ const heroSub = { fontSize: '1.2rem', color: '#475569', marginBottom: '30px', li
 const trustBadge = { display: 'inline-block', background: '#dbeafe', color: '#1e40af', padding: '6px 16px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: '600', marginBottom: '25px' };
 const ctaBtn = { background: '#2563eb', color: 'white', border: 'none', padding: '18px 40px', borderRadius: '12px', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.3)', transition: 'transform 0.2s' };
 const gridContainer = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '30px' };
+
+const miniCard = { display: 'flex', gap: '15px', alignItems: 'flex-start', background: '#f8fafc', padding: '15px', borderRadius: '12px' };
+const miniIcon = { background: '#dbeafe', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', fontSize: '1.2rem' };
