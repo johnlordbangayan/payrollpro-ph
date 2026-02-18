@@ -14,7 +14,7 @@ import HolidayManager from './pages/HolidayManager';
 import OrgSettings from './pages/OrgSettings';
 import PayrollReport from './pages/PayrollReport';
 import MonthlyDeductions from './pages/MonthlyDeductions';
-import ThirteenthMonth from './ThirteenthMonth'; // Ensure this file exists in src/
+import ThirteenthMonth from './pages/ThirteenthMonth';
 import LoanManager from './pages/LoanManager';
 import UserProfile from './pages/UserProfile';
 
