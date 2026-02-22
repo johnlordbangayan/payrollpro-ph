@@ -36,7 +36,7 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     ],
   });
 
-  // 3. PAYROLL LOGIC (Calculations)
+  // 3. PAYROLL DATA
   const activeAdd = (org?.addition_labels || [])
     .map((label, i) => ({ label, val: Number(record.custom_additions?.[i] || 0) }))
     .filter(item => !item.label.startsWith("Add Pay") && item.val !== 0);
@@ -45,16 +45,11 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     .map((label, i) => ({ label, val: Number(record.custom_deductions?.[i] || 0) }))
     .filter(item => !item.label.startsWith("Deduction") && item.val !== 0);
 
-  // --- FIXED HOLIDAY MERGE LOGIC ---
-  // Since record.holiday_pay ALREADY includes Holiday OT and ND premiums, 
-  // we simply use that value directly to avoid double-counting.
-  const totalHolidayPay = Number(record.holiday_pay || 0);
-
   const earnings = [
     ['Basic Pay', Number(record.basic_pay || 0).toFixed(2)],
     ['Regular OT', Number(record.ot_pay || 0).toFixed(2)],
     ['Regular ND', Number(record.nd_pay || 0).toFixed(2)],
-    totalHolidayPay > 0 ? ['Holiday Pay', totalHolidayPay.toFixed(2)] : null,
+    Number(record.holiday_pay) > 0 ? ['Holiday Pay', Number(record.holiday_pay).toFixed(2)] : null,
     ...activeAdd.map(a => [a.label, a.val.toFixed(2)])
   ].filter(Boolean);
 
@@ -92,18 +87,24 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     body: tableBody,
   });
 
-  // 5. TOTALS & NET PAY
+  // 5. TOTALS (GROSS & TOTAL DEDUCTIONS)
   const finalY = doc.lastAutoTable.finalY + 5;
+  const totalDeductions = Number(record.gross_pay || 0) - Number(record.net_pay || 0);
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
+  // Gross on the left
   doc.text(`GROSS: P${Number(record.gross_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + margin, finalY);
+  // Total Deductions on the right
+  doc.text(`TOTAL DED: P${totalDeductions.toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + payslipWidth - margin, finalY, { align: "right" });
   
+  // 6. NET PAY BOX
   doc.setFillColor(240, 244, 248);
   doc.rect(offsetX + margin, finalY + 2, contentWidth, 8, 'F');
   doc.setFontSize(9);
   doc.text(`NET PAY: P${Number(record.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + (payslipWidth / 2), finalY + 7.5, { align: "center" });
 
-  // 6. CUTTING GUIDES
+  // 7. CUTTING GUIDES
   doc.setDrawColor(200);
   doc.setLineDashPattern([1, 1], 0);
   doc.line(105, 0, 105, 297); 
@@ -122,17 +123,13 @@ export const generateBulkPayslips = (org, records) => {
   try {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const itemsPerPage = 6;
-
     records.forEach((record, index) => {
       const slotIndex = index % itemsPerPage;
       if (index > 0 && slotIndex === 0) doc.addPage();
       const col = slotIndex % 2; 
       const row = Math.floor(slotIndex / 2); 
-      const x = col * 105;
-      const y = row * 99;
-      drawGriddedPayslip(doc, org, record, x, y);
+      drawGriddedPayslip(doc, org, record, col * 105, row * 99);
     });
-
     window.open(doc.output('bloburl'), '_blank');
   } catch (err) {
     console.error("Bulk PDF Error:", err);
