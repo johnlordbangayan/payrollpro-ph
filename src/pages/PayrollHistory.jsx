@@ -161,40 +161,47 @@ export default function PayrollHistory({ organizationId }) {
     const rec = editingRecord;
     const r = (num) => Math.round((parseFloat(num) || 0) * 100) / 100;
 
-    const updates = {
-      days_worked: r(rec.inputs.daysWorked),
-      ot_hours: r(rec.inputs.otHours),
-      nd_hours: r(rec.inputs.ndHours),
-      late_minutes: parseInt(rec.inputs.lateMinutes) || 0,
-      undertime_minutes: parseInt(rec.inputs.undertimeMinutes) || 0,
-      reg_holiday_days: r(rec.inputs.regHolidayDays),
-      reg_holiday_ot_hrs: r(rec.inputs.regHolidayOTHrs),
-      reg_holiday_nd: r(rec.inputs.regHolidayND),
-      spec_holiday_days: r(rec.inputs.specHolidayDays),
-      spec_holiday_ot_hrs: r(rec.inputs.specHolidayOTHrs),
-      spec_holiday_nd: r(rec.inputs.specHolidayND),
-      rest_day_hours: r(rec.inputs.restDayHrs),
-      custom_deductions: rec.inputs.custom_deductions.map(v => r(v)),
-      custom_additions: rec.inputs.custom_additions.map(v => r(v)),
-      basic_pay: r(previewPay.basicPay),
-      ot_pay: r(previewPay.otPay),
-      nd_pay: r(previewPay.ndPay),
-      holiday_pay: r(previewPay.holidayPay),
-      gross_pay: r(previewPay.grossPay),
-      sss_deduction: r(previewPay.sssEE),
-      philhealth_deduction: r(previewPay.phEE),
-      pagibig_deduction: r(previewPay.piEE),
-      tax_deduction: r(previewPay.taxWH),
-      net_pay: r(previewPay.netPay),
-    };
-
     try {
+      // Adding defensive checks (|| []) to prevent the .map error if arrays are missing
+      const updates = {
+        days_worked: r(rec.inputs.daysWorked),
+        ot_hours: r(rec.inputs.otHours),
+        nd_hours: r(rec.inputs.ndHours),
+        late_minutes: parseInt(rec.inputs.lateMinutes) || 0,
+        undertime_minutes: parseInt(rec.inputs.undertimeMinutes) || 0,
+        reg_holiday_days: r(rec.inputs.regHolidayDays),
+        reg_holiday_ot_hrs: r(rec.inputs.regHolidayOTHrs),
+        reg_holiday_nd: r(rec.inputs.regHolidayND),
+        spec_holiday_days: r(rec.inputs.specHolidayDays),
+        spec_holiday_ot_hrs: r(rec.inputs.specHolidayOTHrs),
+        spec_holiday_nd: r(rec.inputs.specHolidayND),
+        rest_day_hours: r(rec.inputs.restDayHrs),
+        
+        // Defensive mapping to handle the TypeError
+        custom_deductions: (rec.inputs.customDeductions || []).map(v => r(v)),
+        custom_additions: (rec.inputs.customAdditions || []).map(v => r(v)),
+        
+        basic_pay: r(previewPay.basicPay),
+        ot_pay: r(previewPay.otPay),
+        nd_pay: r(previewPay.ndPay),
+        holiday_pay: r(previewPay.holidayPay),
+        gross_pay: r(previewPay.grossPay),
+        sss_deduction: r(previewPay.sssEE),
+        philhealth_deduction: r(previewPay.phEE),
+        pagibig_deduction: r(previewPay.piEE),
+        tax_deduction: r(previewPay.taxWH),
+        net_pay: r(previewPay.netPay),
+      };
+
       const { error } = await supabase.from('payroll_history').update(updates).eq('id', rec.id);
       if (error) throw error;
-      setRecords(prev => prev.map(r => r.id === rec.id ? { ...r, ...updates } : r));
+      
+      // Update local state and the linked employee data so UI stays consistent
+      setRecords(prev => prev.map(item => item.id === rec.id ? { ...item, ...updates } : item));
       setEditingRecord(null);
       alert("Record updated successfully.");
     } catch (err) {
+      console.error("Save error:", err);
       alert("Update failed: " + err.message);
     }
   };
