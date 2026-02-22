@@ -3,7 +3,6 @@ import autoTable from 'jspdf-autotable';
 
 /**
  * Draws a single payslip in a 105x99mm grid (6 per A4 page)
- * Merges all Holiday components into one "Holiday Pay" row.
  */
 const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   const margin = 8; 
@@ -22,7 +21,6 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   const monthlyRate = parseFloat(record.employees?.salary_rate) || 0;
   const factor = parseFloat(org?.working_days_per_year) || 313;
   const dailyRate = (monthlyRate * 12) / factor;
-  const hourlyRate = dailyRate / 8;
 
   // 2. EMPLOYEE INFO
   autoTable(doc, {
@@ -47,26 +45,16 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     .map((label, i) => ({ label, val: Number(record.custom_deductions?.[i] || 0) }))
     .filter(item => !item.label.startsWith("Deduction") && item.val !== 0);
 
-  // --- HOLIDAY MERGE LOGIC ---
-  // A. Holiday OT (Reg 2.6x, Spec 1.69x)
-  const regHolOTPay = (Number(record.reg_holiday_ot_hrs || 0) * hourlyRate * 2.6);
-  const specHolOTPay = (Number(record.spec_holiday_ot_hrs || 0) * hourlyRate * 1.69);
-  
-  // B. Holiday ND (Reg 2.0x * 10%, Spec 1.3x * 10%)
-  const regHolNDPay = (Number(record.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10;
-  const specHolNDPay = (Number(record.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10;
-
-  // C. Summing all holiday components
-  const totalHolidayPay = 
-    Number(record.holiday_pay || 0) + // The basic premium
-    regHolOTPay + specHolOTPay +     // The OT part
-    regHolNDPay + specHolNDPay;      // The ND part
+  // --- FIXED HOLIDAY MERGE LOGIC ---
+  // Since record.holiday_pay ALREADY includes Holiday OT and ND premiums, 
+  // we simply use that value directly to avoid double-counting.
+  const totalHolidayPay = Number(record.holiday_pay || 0);
 
   const earnings = [
     ['Basic Pay', Number(record.basic_pay || 0).toFixed(2)],
     ['Regular OT', Number(record.ot_pay || 0).toFixed(2)],
     ['Regular ND', Number(record.nd_pay || 0).toFixed(2)],
-    totalHolidayPay > 0 ? ['Holiday Pay', totalHolidayPay.toFixed(2)] : null, // Merged Row
+    totalHolidayPay > 0 ? ['Holiday Pay', totalHolidayPay.toFixed(2)] : null,
     ...activeAdd.map(a => [a.label, a.val.toFixed(2)])
   ].filter(Boolean);
 
@@ -110,18 +98,17 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   doc.setFontSize(7.5);
   doc.text(`GROSS: P${Number(record.gross_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + margin, finalY);
   
-  // Net Pay Highlight Box
   doc.setFillColor(240, 244, 248);
   doc.rect(offsetX + margin, finalY + 2, contentWidth, 8, 'F');
   doc.setFontSize(9);
   doc.text(`NET PAY: P${Number(record.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + (payslipWidth / 2), finalY + 7.5, { align: "center" });
 
-  // 6. CUTTING GUIDES (Visualized for 2x3 Grid)
+  // 6. CUTTING GUIDES
   doc.setDrawColor(200);
   doc.setLineDashPattern([1, 1], 0);
-  doc.line(105, 0, 105, 297); // Vertical divider
-  doc.line(0, 99, 210, 99);   // Row 1 divider
-  doc.line(0, 198, 210, 198); // Row 2 divider
+  doc.line(105, 0, 105, 297); 
+  doc.line(0, 99, 210, 99);   
+  doc.line(0, 198, 210, 198); 
   doc.setLineDashPattern([], 0);
 };
 
@@ -139,13 +126,10 @@ export const generateBulkPayslips = (org, records) => {
     records.forEach((record, index) => {
       const slotIndex = index % itemsPerPage;
       if (index > 0 && slotIndex === 0) doc.addPage();
-
       const col = slotIndex % 2; 
       const row = Math.floor(slotIndex / 2); 
-
       const x = col * 105;
       const y = row * 99;
-
       drawGriddedPayslip(doc, org, record, x, y);
     });
 
