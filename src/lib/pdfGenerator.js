@@ -93,9 +93,7 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
-  // Gross on the left
   doc.text(`GROSS: P${Number(record.gross_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + margin, finalY);
-  // Total Deductions on the right
   doc.text(`TOTAL DED: P${totalDeductions.toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + payslipWidth - margin, finalY, { align: "right" });
   
   // 6. NET PAY BOX
@@ -104,7 +102,14 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   doc.setFontSize(9);
   doc.text(`NET PAY: P${Number(record.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + (payslipWidth / 2), finalY + 7.5, { align: "center" });
 
-  // 7. CUTTING GUIDES
+  // 7. SYSTEM GENERATED DISCLAIMER
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(6);
+  doc.setTextColor(100);
+  doc.text("This is a system generated payslip, no signature required.", offsetX + (payslipWidth / 2), finalY + 13, { align: "center" });
+  doc.setTextColor(0); // Reset color for next payslip
+
+  // 8. CUTTING GUIDES
   doc.setDrawColor(200);
   doc.setLineDashPattern([1, 1], 0);
   doc.line(105, 0, 105, 297); 
