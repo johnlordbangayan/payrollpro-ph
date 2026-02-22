@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 
 /**
  * Draws a single payslip in a 105x99mm grid (6 per A4 page)
+ * Merges all Holiday components into one "Holiday Pay" row.
  */
 const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   const margin = 8; 
@@ -23,7 +24,7 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   const dailyRate = (monthlyRate * 12) / factor;
   const hourlyRate = dailyRate / 8;
 
-  // 2. EMPLOYEE INFO (Grid Style)
+  // 2. EMPLOYEE INFO
   autoTable(doc, {
     startY: offsetY + 18,
     margin: { left: offsetX + margin },
@@ -37,7 +38,7 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     ],
   });
 
-  // 3. PAYROLL LOGIC (Earnings vs Deductions)
+  // 3. PAYROLL LOGIC (Calculations)
   const activeAdd = (org?.addition_labels || [])
     .map((label, i) => ({ label, val: Number(record.custom_additions?.[i] || 0) }))
     .filter(item => !item.label.startsWith("Add Pay") && item.val !== 0);
@@ -46,21 +47,26 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     .map((label, i) => ({ label, val: Number(record.custom_deductions?.[i] || 0) }))
     .filter(item => !item.label.startsWith("Deduction") && item.val !== 0);
 
+  // --- HOLIDAY MERGE LOGIC ---
+  // A. Holiday OT (Reg 2.6x, Spec 1.69x)
   const regHolOTPay = (Number(record.reg_holiday_ot_hrs || 0) * hourlyRate * 2.6);
   const specHolOTPay = (Number(record.spec_holiday_ot_hrs || 0) * hourlyRate * 1.69);
-  const totalHolOTPay = regHolOTPay + specHolOTPay;
-
+  
+  // B. Holiday ND (Reg 2.0x * 10%, Spec 1.3x * 10%)
   const regHolNDPay = (Number(record.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10;
   const specHolNDPay = (Number(record.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10;
-  const totalHolNDPay = regHolNDPay + specHolNDPay;
+
+  // C. Summing all holiday components
+  const totalHolidayPay = 
+    Number(record.holiday_pay || 0) + // The basic premium
+    regHolOTPay + specHolOTPay +     // The OT part
+    regHolNDPay + specHolNDPay;      // The ND part
 
   const earnings = [
     ['Basic Pay', Number(record.basic_pay || 0).toFixed(2)],
     ['Regular OT', Number(record.ot_pay || 0).toFixed(2)],
     ['Regular ND', Number(record.nd_pay || 0).toFixed(2)],
-    ['Holiday Prem', Number(record.holiday_pay || 0).toFixed(2)],
-    totalHolOTPay > 0 ? ['Holiday OT', totalHolOTPay.toFixed(2)] : null,
-    totalHolNDPay > 0 ? ['Holiday ND', totalHolNDPay.toFixed(2)] : null,
+    totalHolidayPay > 0 ? ['Holiday Pay', totalHolidayPay.toFixed(2)] : null, // Merged Row
     ...activeAdd.map(a => [a.label, a.val.toFixed(2)])
   ].filter(Boolean);
 
@@ -91,7 +97,7 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
     margin: { left: offsetX + margin },
     tableWidth: contentWidth,
     theme: 'grid',
-    styles: { fontSize: 6, cellPadding: 0.8 },
+    styles: { fontSize: 6.5, cellPadding: 0.8 },
     headStyles: { fillColor: [245, 245, 245], textColor: [0, 0, 0] },
     columnStyles: { 1: { halign: 'right' }, 3: { halign: 'right' } },
     head: [['EARNINGS', 'AMT', 'DEDUCTIONS', 'AMT']],
@@ -101,27 +107,25 @@ const drawGriddedPayslip = (doc, org, record, offsetX, offsetY) => {
   // 5. TOTALS & NET PAY
   const finalY = doc.lastAutoTable.finalY + 5;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(7);
+  doc.setFontSize(7.5);
   doc.text(`GROSS: P${Number(record.gross_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + margin, finalY);
   
-  doc.setFillColor(248, 250, 252);
-  doc.rect(offsetX + margin, finalY + 2, contentWidth, 7, 'F');
-  doc.setFontSize(8);
-  doc.text(`NET PAY: P${Number(record.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + (payslipWidth / 2), finalY + 7, { align: "center" });
+  // Net Pay Highlight Box
+  doc.setFillColor(240, 244, 248);
+  doc.rect(offsetX + margin, finalY + 2, contentWidth, 8, 'F');
+  doc.setFontSize(9);
+  doc.text(`NET PAY: P${Number(record.net_pay || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`, offsetX + (payslipWidth / 2), finalY + 7.5, { align: "center" });
 
-  // 6. CUTTING GUIDES (Dashed)
+  // 6. CUTTING GUIDES (Visualized for 2x3 Grid)
   doc.setDrawColor(200);
   doc.setLineDashPattern([1, 1], 0);
-  // Vertical center line
-  doc.line(105, 0, 105, 297);
-  // Horizontal lines
-  doc.line(0, 99, 210, 99);
-  doc.line(0, 198, 210, 198);
+  doc.line(105, 0, 105, 297); // Vertical divider
+  doc.line(0, 99, 210, 99);   // Row 1 divider
+  doc.line(0, 198, 210, 198); // Row 2 divider
   doc.setLineDashPattern([], 0);
 };
 
 export const generatePayslipPDF = (org, record) => {
-  // Preview for one still uses the gridded box size
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [105, 99] });
   drawGriddedPayslip(doc, org, record, 0, 0);
   window.open(doc.output('bloburl'), '_blank');
@@ -134,12 +138,10 @@ export const generateBulkPayslips = (org, records) => {
 
     records.forEach((record, index) => {
       const slotIndex = index % itemsPerPage;
-      
       if (index > 0 && slotIndex === 0) doc.addPage();
 
-      // Math for 2 columns, 3 rows
-      const col = slotIndex % 2; // 0 or 1
-      const row = Math.floor(slotIndex / 2); // 0, 1, or 2
+      const col = slotIndex % 2; 
+      const row = Math.floor(slotIndex / 2); 
 
       const x = col * 105;
       const y = row * 99;
