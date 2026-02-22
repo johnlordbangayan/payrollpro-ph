@@ -59,7 +59,7 @@ export default function PayrollHistory({ organizationId }) {
     initializeHistory();
   }, [organizationId]);
 
-  // --- [FETCH LOGIC: ALPHABETICAL SORT] ---
+  // --- [FETCH LOGIC: SORT BY DEPARTMENT THEN NAME] ---
   const fetchHistory = async (start, end) => {
     let query = supabase.from('payroll_history').select(`*, employees(*)`);
     query = query.eq('organization_id', organizationId);
@@ -70,10 +70,18 @@ export default function PayrollHistory({ organizationId }) {
     
     if (data) {
       const sorted = [...data].sort((a, b) => {
+        // 1. Sort by Department (Handling nulls/unassigned)
+        const deptA = (a.employees?.department || "ZZZ-Unassigned").toUpperCase();
+        const deptB = (b.employees?.department || "ZZZ-Unassigned").toUpperCase();
+        if (deptA < deptB) return -1;
+        if (deptA > deptB) return 1;
+
+        // 2. Sort by Last Name within same department
         const nameA = (a.employees?.last_name || "").toUpperCase();
         const nameB = (b.employees?.last_name || "").toUpperCase();
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
+        
         return (a.employees?.first_name || "").localeCompare(b.employees?.first_name || "");
       });
       setRecords(sorted);
@@ -84,6 +92,7 @@ export default function PayrollHistory({ organizationId }) {
 
   const handleBulkPrint = () => {
     if (records.length === 0) return alert("No records to print.");
+    // The records array is already sorted by department, so the PDF will follow this order.
     generateBulkPayslips(orgData, records);
   };
 
@@ -100,7 +109,6 @@ export default function PayrollHistory({ organizationId }) {
 
   // --- [EDIT HANDLERS] ---
   const handleEditClick = (record) => {
-    // Determine initial modes based on existing deduction values
     const initialInputs = {
       daysWorked: record.days_worked || 0,
       otHours: record.ot_hours || 0,
@@ -166,8 +174,8 @@ export default function PayrollHistory({ organizationId }) {
       spec_holiday_ot_hrs: r(rec.inputs.specHolidayOTHrs),
       spec_holiday_nd: r(rec.inputs.specHolidayND),
       rest_day_hours: r(rec.inputs.restDayHrs),
-      custom_deductions: rec.inputs.customDeductions.map(v => r(v)),
-      custom_additions: rec.inputs.customAdditions.map(v => r(v)),
+      custom_deductions: rec.inputs.custom_deductions.map(v => r(v)),
+      custom_additions: rec.inputs.custom_additions.map(v => r(v)),
       basic_pay: r(previewPay.basicPay),
       ot_pay: r(previewPay.otPay),
       nd_pay: r(previewPay.ndPay),
@@ -217,23 +225,41 @@ export default function PayrollHistory({ organizationId }) {
             <tr style={theadStyle}>
               <th style={th}>Period</th>
               <th style={th}>Employee</th>
+              <th style={th}>Dept</th>
               <th style={th}>Net Pay</th>
               <th style={{ ...th, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {records.map(r => (
-              <tr key={r.id} style={trStyle}>
-                <td style={td}>{r.period_start} to {r.period_end}</td>
-                <td style={td}><strong>{r.employees?.last_name?.toUpperCase()}, {r.employees?.first_name}</strong></td>
-                <td style={{ ...td, color: '#16a34a', fontWeight: 'bold' }}>₱{Number(r.net_pay).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td style={{ ...td, textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  <button onClick={() => handleEditClick(r)} style={editBtn}>✏️ Edit</button>
-                  <button onClick={() => generatePayslipPDF(orgData, r)} style={viewBtn}>PDF</button>
-                  <button onClick={() => handleDelete(r.id, `${r.employees?.first_name} ${r.employees?.last_name}`)} style={deleteBtn}>Del</button>
-                </td>
-              </tr>
-            ))}
+            {records.map((r, idx) => {
+              // Grouping UI Logic
+              const currentDept = r.employees?.department || "Unassigned";
+              const prevDept = idx > 0 ? records[idx - 1].employees?.department : null;
+              const isNewDept = currentDept !== prevDept;
+
+              return (
+                <React.Fragment key={r.id}>
+                  {isNewDept && (
+                    <tr style={{ background: '#f1f5f9' }}>
+                      <td colSpan="5" style={{ padding: '8px 15px', fontSize: '0.7rem', fontWeight: 'bold', color: '#64748b' }}>
+                        📁 {currentDept.toUpperCase()}
+                      </td>
+                    </tr>
+                  )}
+                  <tr style={trStyle}>
+                    <td style={td}>{r.period_start} to {r.period_end}</td>
+                    <td style={td}><strong>{r.employees?.last_name?.toUpperCase()}, {r.employees?.first_name}</strong></td>
+                    <td style={{...td, color: '#94a3b8', fontSize: '0.8rem'}}>{r.employees?.department || '---'}</td>
+                    <td style={{ ...td, color: '#16a34a', fontWeight: 'bold' }}>₱{Number(r.net_pay).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td style={{ ...td, textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                      <button onClick={() => handleEditClick(r)} style={editBtn}>✏️</button>
+                      <button onClick={() => generatePayslipPDF(orgData, r)} style={viewBtn}>PDF</button>
+                      <button onClick={() => handleDelete(r.id, `${r.employees?.first_name} ${r.employees?.last_name}`)} style={deleteBtn}>Del</button>
+                    </td>
+                  </tr>
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -260,7 +286,6 @@ export default function PayrollHistory({ organizationId }) {
                 <div style={formGrid}>
                   <div style={fieldBox}><label>Days Worked</label><input type="number" value={editingRecord.inputs.daysWorked} onChange={e => handleModalChange('daysWorked', e.target.value)} style={input} /></div>
                   <div style={fieldBox}><label>Regular OT (H)</label><input type="number" value={editingRecord.inputs.otHours} onChange={e => handleModalChange('otHours', e.target.value)} style={input} /></div>
-                  {/* RESTORED REGULAR ND */}
                   <div style={fieldBox}><label>Regular ND (H)</label><input type="number" value={editingRecord.inputs.ndHours} onChange={e => handleModalChange('ndHours', e.target.value)} style={input} /></div>
                   <div style={fieldBox}><label>Late (Mins)</label><input type="number" value={editingRecord.inputs.lateMinutes} onChange={e => handleModalChange('lateMinutes', e.target.value)} style={input} /></div>
                   <div style={fieldBox}><label>Undertime (M)</label><input type="number" value={editingRecord.inputs.undertimeMinutes} onChange={e => handleModalChange('undertimeMinutes', e.target.value)} style={input} /></div>
