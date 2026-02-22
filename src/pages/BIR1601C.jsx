@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { PDFDocument } from 'pdf-lib';
+import jsPDF from 'jspdf';             // Import jsPDF default
+import autoTable from 'jspdf-autotable'; // Import autoTable default
 
 export default function BIR1601C({ organizationId, orgSettings }) {
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function BIR1601C({ organizationId, orgSettings }) {
 
     const { data: payrolls, error } = await supabase
       .from('payroll_history')
-      .select('*')
+      .select(`*, employees (salary_rate, id)`)
       .eq('organization_id', organizationId)
       .gte('period_end', startDate)
       .lte('period_end', endDate);
@@ -36,23 +37,39 @@ export default function BIR1601C({ organizationId, orgSettings }) {
       return;
     }
 
-    let totalCompensation = 0;
-    let totalContribs = 0;
-    let totalTaxWithheld = 0;
+    let totalCompensation = 0;       // Line 14
+    let totalNonTaxable = 0;         // Line 21
+    let totalExempt250k = 0;         // Line 23
+    let totalTaxWithheld = 0;        // Line 25
 
     payrolls.forEach(row => {
-        totalCompensation += Number(row.gross_pay) || 0;
-        totalContribs += (Number(row.sss_deduction) || 0) + (Number(row.philhealth_deduction) || 0) + (Number(row.pagibig_deduction) || 0);
-        totalTaxWithheld += Number(row.tax_deduction) || 0;
+        const gross = Number(row.gross_pay) || 0;
+        const statutory = (Number(row.sss_deduction) || 0) + (Number(row.philhealth_deduction) || 0) + (Number(row.pagibig_deduction) || 0);
+        const tax = Number(row.tax_deduction) || 0;
+        
+        totalCompensation += gross;
+        totalNonTaxable += statutory; 
+        totalTaxWithheld += tax;
+
+        // CHECK 250K RULE
+        const rowTaxableIncome = gross - statutory;
+        const monthlyRate = Number(row.employees?.salary_rate) || 0;
+        const annualRate = monthlyRate * 12;
+
+        if (annualRate <= 250000) {
+            totalExempt250k += rowTaxableIncome; 
+        }
     });
 
-    const totalNonTaxable = totalContribs; // Simplified (Add De Minimis logic here if needed)
-    const taxableCompensation = totalCompensation - totalNonTaxable;
+    const taxableCompensation = totalCompensation - totalNonTaxable; // Line 22
+    const netTaxableCompensation = taxableCompensation - totalExempt250k; // Line 24
 
     setTaxData({
         totalCompensation,
         totalNonTaxable,
         taxableCompensation,
+        totalExempt250k,
+        netTaxableCompensation,
         totalTaxWithheld,
         count: payrolls.length
     });
@@ -60,86 +77,72 @@ export default function BIR1601C({ organizationId, orgSettings }) {
     setLoading(false);
   };
 
-  // --- 📄 FILL PDF FORM ---
-  const fillAndDownloadPDF = async () => {
+  // --- 📄 GENERATE PDF (Direct Download) ---
+  const generateGuidePDF = () => {
     if (!taxData) return;
+    
+    // 1. Initialize Document
+    const doc = new jsPDF();
 
-    try {
-      // 1. Load the existing PDF from public folder
-      const formUrl = '/forms/1601C_2018.pdf';
-      const existingPdfBytes = await fetch(formUrl).then(res => res.arrayBuffer());
+    // 2. Add Header
+    doc.setFontSize(16);
+    doc.text("BIR Form 1601-C Data Guide", 14, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text("Use these figures to fill out your eBIRForm / EFPS.", 14, 26);
+    
+    // 3. Company Info Table
+    autoTable(doc, {
+        startY: 32,
+        body: [
+            ['TIN', orgSettings?.tin || 'N/A'],
+            ['Agent Name', orgSettings?.name || 'N/A'],
+            ['Period', `${months.find(m=>m.val===month)?.label} ${year}`]
+        ],
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 } }
+    });
 
-      // 2. Load into PDF-Lib
-      const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      const page = pdfDoc.getPages()[0];
-      
-      // 3. Helper to draw text (Coordinates are from Bottom-Left by default in PDF files)
-      // NOTE: You may need to adjust X and Y to align perfectly with your specific PDF version.
-      const draw = (text, x, y, size = 10) => {
-        page.drawText(String(text), { x, y, size });
-      };
+    // 4. Computation Table (Number First!)
+    autoTable(doc, {
+        startY: 55,
+        head: [['Line', 'Description', 'Amount (PHP)']],
+        body: [
+            ['14', 'Total Amount of Compensation', Number(taxData.totalCompensation).toLocaleString(undefined, {minimumFractionDigits:2})],
+            ['19', 'Less: Statutory (SSS/PHIC/HDMF)', Number(taxData.totalNonTaxable).toLocaleString(undefined, {minimumFractionDigits:2})],
+            ['21', 'Total Non-Taxable Compensation', Number(taxData.totalNonTaxable).toLocaleString(undefined, {minimumFractionDigits:2})],
+            ['22', 'Taxable Compensation (14 - 21)', Number(taxData.taxableCompensation).toLocaleString(undefined, {minimumFractionDigits:2})],
+            ['23', 'Less: Exempt (Annual Income < 250k)', { content: Number(taxData.totalExempt250k).toLocaleString(undefined, {minimumFractionDigits:2}), styles: { textColor: [217, 119, 6] } }],
+            ['24', 'Net Taxable Compensation (22 - 23)', { content: Number(taxData.netTaxableCompensation).toLocaleString(undefined, {minimumFractionDigits:2}), styles: { fontStyle: 'bold' } }],
+            
+            // Results
+            ['25', 'TAX DUE', { content: Number(taxData.totalTaxWithheld).toLocaleString(undefined, {minimumFractionDigits:2}), styles: { fillColor: [240, 253, 244], fontStyle: 'bold', textColor: [22, 163, 74] } }],
+            ['27', 'AMOUNT REMITTABLE', { content: Number(taxData.totalTaxWithheld).toLocaleString(undefined, {minimumFractionDigits:2}), styles: { fillColor: [220, 252, 231], fontStyle: 'bold', textColor: [21, 128, 61], fontSize: 12 } }]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], halign: 'left' },
+        columnStyles: { 
+            0: { halign: 'center', fontStyle: 'bold', cellWidth: 15 }, // Narrow column for Line Number
+            2: { halign: 'right', cellWidth: 40, fontStyle: 'bold' }    // Right align amounts
+        }
+    });
 
-      const format = (num) => Number(num).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    // 5. Footer
+    const finalY = doc.lastAutoTable.finalY + 15;
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text(`Generated by PayrollPro PH on ${new Date().toLocaleDateString()}`, 14, finalY);
 
-      // --- MAPPING DATA TO COORDINATES (Approximate for 2018 Form) ---
-      
-      // Header Info
-      draw(String(month).padStart(2, '0'), 135, 762); // Month
-      draw(String(year), 180, 762); // Year
-      
-      // TIN (Split 9 digits + 3 branch)
-      const tin = (orgSettings?.tin || "").replace(/[^0-9]/g, '');
-      if (tin.length >= 9) {
-          draw(tin.substring(0,3), 135, 715);
-          draw(tin.substring(3,6), 185, 715);
-          draw(tin.substring(6,9), 235, 715);
-          draw(tin.substring(9,12) || '000', 290, 715); // Branch
-      }
-
-      draw(orgSettings?.name || "My Company", 135, 690); // Name
-      draw(orgSettings?.address || "Company Address", 135, 665); // Address
-
-      // Computation Part II (X coordinates are approximate for the columns)
-      const colX = 400; // The column where amounts go
-      
-      // Line 14: Total Compensation
-      draw(format(taxData.totalCompensation), colX, 555);
-
-      // Line 19: SSS/PHIC/HDMF (Statutory)
-      draw(format(taxData.totalNonTaxable), colX, 480);
-      
-      // Line 21: Total Non-Taxable
-      draw(format(taxData.totalNonTaxable), colX, 455);
-
-      // Line 22: Taxable Compensation
-      draw(format(taxData.taxableCompensation), colX, 440);
-
-      // Line 25: Tax Due
-      draw(format(taxData.totalTaxWithheld), colX, 395);
-
-      // Line 27: Amount Remittable
-      draw(format(taxData.totalTaxWithheld), colX, 365);
-
-
-      // 4. Save and Download
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `BIR_1601C_${year}_${month}.pdf`;
-      link.click();
-
-    } catch (err) {
-      console.error(err);
-      alert("Error generating PDF. Make sure /public/forms/1601C_2018.pdf exists!");
-    }
+    // 6. FORCE DOWNLOAD
+    doc.save(`BIR_1601C_${year}_${month}.pdf`);
   };
 
   return (
     <div style={container}>
-      <h2 style={{marginTop:0, color:'#1e293b'}}>🏛️ Monthly Remittance (1601-C)</h2>
+      <h2 style={{marginTop:0, color:'#1e293b'}}>🏛️ BIR 1601-C Data Guide</h2>
       <p style={{fontSize:'0.9rem', color:'#64748b', marginBottom:'20px'}}>
-        Auto-fill the official BIR 1601-C Form with your payroll data.
+        Generate exact figures to transcribe into your 1601-C eBIRForm.
       </p>
 
       {/* CONTROLS */}
@@ -160,36 +163,42 @@ export default function BIR1601C({ organizationId, orgSettings }) {
         </div>
       </div>
 
-      {/* RESULTS */}
+      {/* RESULTS PREVIEW */}
       {taxData && (
           <div style={resultCard}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px'}}>
                 <div style={{fontWeight:'bold', color:'#334155'}}>Payroll Data ({taxData.count} runs)</div>
-                <button onClick={fillAndDownloadPDF} style={btnPdf}>
-                   📄 2. Download Filled BIR Form
+                <button onClick={generateGuidePDF} style={btnPdf}>
+                   📥 2. Download Data Guide
                 </button>
             </div>
 
             <div style={grid}>
+                {/* PREVIEW TABLE WITH LINE NUMBERS FIRST */}
                 <div style={item}>
-                    <label>Total Compensation</label>
+                    <label><strong>14</strong> Total Compensation</label>
                     <strong>{Number(taxData.totalCompensation).toLocaleString()}</strong>
                 </div>
                 <div style={item}>
-                    <label>Non-Taxable (SSS/Phic/Pagibig)</label>
+                    <label><strong>19/21</strong> Non-Taxable</label>
                     <strong>{Number(taxData.totalNonTaxable).toLocaleString()}</strong>
                 </div>
                 <div style={item}>
-                    <label>Taxable Compensation</label>
+                    <label><strong>22</strong> Taxable Comp</label>
                     <strong>{Number(taxData.taxableCompensation).toLocaleString()}</strong>
                 </div>
+                <div style={item}>
+                    <label><strong>23</strong> Exempt (250k Rule)</label>
+                    <strong style={{color:'#d97706'}}>{Number(taxData.totalExempt250k).toLocaleString()}</strong>
+                </div>
+                <div style={item}>
+                    <label><strong>24</strong> Net Taxable</label>
+                    <strong>{Number(taxData.netTaxableCompensation).toLocaleString()}</strong>
+                </div>
                 <div style={{...item, background:'#dcfce7', borderColor:'#86efac'}}>
-                    <label style={{color:'#166534'}}>Total Tax Due</label>
+                    <label style={{color:'#166534'}}><strong>25</strong> Tax Due</label>
                     <strong style={{color:'#15803d'}}>₱{Number(taxData.totalTaxWithheld).toLocaleString()}</strong>
                 </div>
-            </div>
-            <div style={{marginTop:'15px', fontSize:'0.8rem', color:'#94a3b8', fontStyle:'italic'}}>
-                * Note: Verify these figures against your records before filing.
             </div>
           </div>
       )}

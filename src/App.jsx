@@ -16,8 +16,11 @@ import PayrollReport from './pages/PayrollReport';
 import MonthlyDeductions from './pages/MonthlyDeductions';
 import ThirteenthMonth from './pages/ThirteenthMonth';
 import LoanManager from './pages/LoanManager';
-import BIR1601C from './pages/BIR1601C';
 import UserProfile from './pages/UserProfile';
+
+// --- BIR FORMS ---
+import BIR1601C from './pages/BIR1601C';
+import BIR2316Excel from './pages/BIR2316Excel';
 
 function App() {
   const { user, loading: authLoading } = useAuth();
@@ -27,12 +30,14 @@ function App() {
   const [currentView, setCurrentView] = useState('select'); 
   const [subView, setSubView] = useState('employees'); 
   
+  // --- DROPDOWN STATE ---
+  const [showBirMenu, setShowBirMenu] = useState(false);
+
   // --- SYSTEM STATES ---
   const [syncing, setSyncing] = useState(false); 
   const [showToast, setShowToast] = useState(false);
   const [reconnectKey, setReconnectKey] = useState(0); 
   const [dbStatus, setDbStatus] = useState('online');
-
   const [trialExpired, setTrialExpired] = useState(false);
 
   // --- ORGANIZATION STATE ---
@@ -135,6 +140,14 @@ function App() {
     setPublicView('landing');
   };
 
+  // --- NAVIGATION HELPERS ---
+  const handleNavClick = (view) => {
+    setSubView(view);
+    setShowBirMenu(false); // Close dropdown if clicking other tabs
+  };
+
+  const isBirActive = ['bir_1601c', 'bir_2316'].includes(subView);
+
   // --- RENDER HELPERS ---
   if (authLoading) return <div style={loadingOverlay}>Verifying Session...</div>;
 
@@ -177,33 +190,43 @@ function App() {
           
           {!trialExpired ? (
               <nav style={navBarContainer}>
-                {[
-                  { id: 'employees', label: 'Employees' },
-                  { id: 'payroll', label: 'Payroll Run' },
-                  { id: 'loans', label: '💰 Loans' },
-                  { id: 'history', label: 'History' },
-                  { id: 'report', label: 'Master Report' },
-                  { id: 'monthly', label: 'Monthly Ded.' },
-                  { id: 'thirteenth', label: '13th Month' }, // --- NEW TAB ---
-                  { id: 'holidays', label: 'Holidays' },
-                  { id: 'bir1601c', label: 'BIR 1601-C' },
-                  { id: 'settings', label: 'Settings' }
-                ].map(tab => (
-                  <button 
-                    key={tab.id}
-                    onClick={() => setSubView(tab.id)} 
-                    style={subView === tab.id ? navActive : navInactive}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                <button onClick={() => handleNavClick('employees')} style={subView === 'employees' ? navActive : navInactive}>Employees</button>
+                <button onClick={() => handleNavClick('payroll')} style={subView === 'payroll' ? navActive : navInactive}>Payroll Run</button>
+                <button onClick={() => handleNavClick('loans')} style={subView === 'loans' ? navActive : navInactive}>💰 Loans</button>
+                <button onClick={() => handleNavClick('history')} style={subView === 'history' ? navActive : navInactive}>History</button>
+                <button onClick={() => handleNavClick('report')} style={subView === 'report' ? navActive : navInactive}>Master Report</button>
+                <button onClick={() => handleNavClick('monthly')} style={subView === 'monthly' ? navActive : navInactive}>Monthly Ded.</button>
+                <button onClick={() => handleNavClick('thirteenth')} style={subView === 'thirteenth' ? navActive : navInactive}>13th Month</button>
+                
+                {/* --- BIR DROPDOWN --- */}
+                <div style={{ position: 'relative' }}>
+                    <button 
+                        onClick={() => setShowBirMenu(!showBirMenu)} 
+                        style={isBirActive ? navActive : navInactive}
+                    >
+                        🏛️ BIR Forms ▾
+                    </button>
+                    {showBirMenu && (
+                        <div style={dropdownStyle}>
+                            <button onClick={() => { setSubView('bir_1601c'); setShowBirMenu(false); }} style={dropdownItem}>
+                                Form 1601-C (Monthly)
+                            </button>
+                            <button onClick={() => { setSubView('bir_2316'); setShowBirMenu(false); }} style={dropdownItem}>
+                                Form 2316 (Annual)
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <button onClick={() => handleNavClick('holidays')} style={subView === 'holidays' ? navActive : navInactive}>Holidays</button>
+                <button onClick={() => handleNavClick('settings')} style={subView === 'settings' ? navActive : navInactive}>Settings</button>
               </nav>
           ) : (
               <div style={expiredBanner}>⚠️ Subscription Required to Access Dashboard</div>
           )}
         </header>
 
-        <main style={{ padding: '20px', maxWidth: '1600px', margin: 'auto' }}>
+        <main style={{ padding: '20px', maxWidth: '1600px', margin: 'auto', minHeight: '80vh' }} onClick={() => setShowBirMenu(false)}>
             {syncing && subView !== 'profile' ? (
                 <div style={syncOverlayStyle}>Refreshing Org Settings...</div>
             ) : (
@@ -217,12 +240,13 @@ function App() {
                             {subView === 'history' && <PayrollHistory organizationId={activeOrg.id} />}
                             {subView === 'report' && activeOrg?.deduction_labels && <PayrollReport organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             {subView === 'monthly' && <MonthlyDeductions organizationId={activeOrg.id} orgSettings={activeOrg} />}
-                            
-                            {/* --- NEW COMPONENT RENDER --- */}
                             {subView === 'thirteenth' && <ThirteenthMonth organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             
+                            {/* --- BIR VIEWS --- */}
+                            {subView === 'bir_1601c' && <BIR1601C organizationId={activeOrg.id} orgSettings={activeOrg} />}
+                            {subView === 'bir_2316' && <BIR2316Excel organizationId={activeOrg.id} orgSettings={activeOrg} />}
+
                             {subView === 'holidays' && <HolidayManager organizationId={activeOrg.id} />}
-                            {subView === 'bir1601c' && <BIR1601C organizationId={activeOrg.id} orgSettings={activeOrg} />}
                             {subView === 'settings' && <OrgSettings org={activeOrg} onUpdate={setActiveOrg} />}
                         </>
                     )}
@@ -250,5 +274,34 @@ const navInactive = { padding: '10px 18px', backgroundColor: 'transparent', colo
 const switchBtn = { backgroundColor: '#334155', color: '#e2e8f0', border: 'none', padding: '8px 16px', borderRadius: '10px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' };
 const profileCircle = { width: '40px', height: '40px', borderRadius: '50%', background: '#3b82f6', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '2px solid rgba(255,255,255,0.2)' };
 const expiredBanner = { padding: '12px', background: '#ef4444', color: 'white', borderRadius: '10px', fontSize: '0.85rem', textAlign: 'center', marginTop: '5px', fontWeight: 'bold', letterSpacing: '0.025em' };
+
+// --- DROPDOWN STYLES ---
+const dropdownStyle = {
+    position: 'absolute',
+    top: '110%',
+    left: 0,
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+    border: '1px solid #e2e8f0',
+    minWidth: '180px',
+    zIndex: 50,
+    overflow: 'hidden',
+    padding: '5px 0'
+};
+
+const dropdownItem = {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    padding: '10px 15px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: '#334155',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+    fontWeight: '500',
+    transition: 'background 0.2s'
+};
 
 export default App;

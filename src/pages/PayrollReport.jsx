@@ -53,16 +53,21 @@ export default function PayrollReport({ organizationId, orgSettings }) {
     if (error) {
       console.error(error);
     } else if (data) {
-      // 2. --- [FIXED: ROBUST ALPHABETICAL SORTING] ---
+      // 2. --- [UPDATED: SORT BY DEPARTMENT THEN LAST NAME] ---
       const sorted = [...data].sort((a, b) => {
+        // First sort by Department
+        const deptA = (a.employees?.department || "Unassigned").toUpperCase();
+        const deptB = (b.employees?.department || "Unassigned").toUpperCase();
+        if (deptA < deptB) return -1;
+        if (deptA > deptB) return 1;
+
+        // Then sort by Last Name
         const nameA = (a.employees?.last_name || "").toUpperCase();
         const nameB = (b.employees?.last_name || "").toUpperCase();
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
         
-        const firstA = (a.employees?.first_name || "").toUpperCase();
-        const firstB = (b.employees?.first_name || "").toUpperCase();
-        return firstA.localeCompare(firstB);
+        return 0;
       });
 
       setReportData(sorted);
@@ -127,7 +132,7 @@ export default function PayrollReport({ organizationId, orgSettings }) {
     link.click();
   };
 
-  // --- PDF GENERATOR (UPDATED: Full First Name) ---
+  // --- PDF GENERATOR ---
   const generatePDFReport = () => {
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
@@ -165,7 +170,6 @@ export default function PayrollReport({ organizationId, orgSettings }) {
 
         return [
           row.employees?.employee_id_number,
-          // --- UPDATED THIS LINE: Removed [0] and the period ---
           `${row.employees?.last_name}, ${row.employees?.first_name}`,
           row.employees?.department?.substring(0, 8),
           row.days_worked,
@@ -264,31 +268,43 @@ export default function PayrollReport({ organizationId, orgSettings }) {
               const monetaryHolND = ((Number(row.reg_holiday_nd || 0) * hourlyRate * 2.0) * 0.10) + 
                                     ((Number(row.spec_holiday_nd || 0) * hourlyRate * 1.3) * 0.10);
 
+              // Logic for Department Header
+              const currentDept = row.employees?.department || "Unassigned";
+              const prevDept = idx > 0 ? filteredData[idx - 1].employees?.department : null;
+              const isNewDept = currentDept !== prevDept;
+
               return (
-                <tr key={row.id} style={idx % 2 === 0 ? trEven : trOdd}>
-                  <td>{row.employees?.employee_id_number}</td>
-                  <td style={stickyCol}>{row.employees?.last_name}, {row.employees?.first_name}</td>
-                  <td>{row.employees?.department}</td>
-                  <td style={numCol}>{row.days_worked}</td>
-                  <td style={numCol}>{Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0)}</td>
-                  <td style={numCol}>{row.nd_hours || 0}</td>
-                  <td style={valCol}>{Number(row.basic_pay).toLocaleString()}</td>
-                  <td style={valCol}>{Number(row.ot_pay).toLocaleString()}</td>
-                  <td style={valCol}>{monetaryHolOT.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td style={valCol}>{Number(row.nd_pay || 0).toLocaleString()}</td>
-                  <td style={valCol}>{monetaryHolND.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td style={valCol}>{Number(row.holiday_pay || 0).toLocaleString()}</td>
-                  {activeAdditions.map(a => <td key={a.index} style={valCol}>{Number(row.custom_additions?.[a.index] || 0).toLocaleString()}</td>)}
-                  <td style={{...valCol, fontWeight:'bold', background:'#f8fafc'}}>{Number(row.gross_pay).toLocaleString()}</td>
-                  <td style={dedCol}>{Number(row.time_deduction || 0).toLocaleString()}</td>
-                  {activeDeductions.map(d => <td key={d.index} style={dedCol}>{Number(row.custom_deductions?.[d.index] || 0).toLocaleString()}</td>)}
-                  <td style={dedCol}>{Number(row.loan_deduction || 0).toLocaleString()}</td>
-                  <td style={statCol}>{Number(row.sss_deduction).toLocaleString()}</td>
-                  <td style={statCol}>{Number(row.philhealth_deduction).toLocaleString()}</td>
-                  <td style={statCol}>{Number(row.pagibig_deduction).toLocaleString()}</td>
-                  <td style={statCol}>{Number(row.tax_deduction).toLocaleString()}</td>
-                  <td className="net-col" style={netCol}>₱{Number(row.net_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                </tr>
+                <React.Fragment key={row.id}>
+                  {isNewDept && (
+                    <tr style={{ background: '#e2e8f0', fontWeight: 'bold' }}>
+                      <td colSpan="100%" style={{ padding: '8px', color: '#1e293b' }}>📁 {currentDept.toUpperCase()}</td>
+                    </tr>
+                  )}
+                  <tr style={idx % 2 === 0 ? trEven : trOdd}>
+                    <td>{row.employees?.employee_id_number}</td>
+                    <td style={stickyCol}>{row.employees?.last_name}, {row.employees?.first_name}</td>
+                    <td>{row.employees?.department}</td>
+                    <td style={numCol}>{row.days_worked}</td>
+                    <td style={numCol}>{Number(row.late_minutes || 0) + Number(row.undertime_minutes || 0)}</td>
+                    <td style={numCol}>{row.nd_hours || 0}</td>
+                    <td style={valCol}>{Number(row.basic_pay).toLocaleString()}</td>
+                    <td style={valCol}>{Number(row.ot_pay).toLocaleString()}</td>
+                    <td style={valCol}>{monetaryHolOT.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td style={valCol}>{Number(row.nd_pay || 0).toLocaleString()}</td>
+                    <td style={valCol}>{monetaryHolND.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td style={valCol}>{Number(row.holiday_pay || 0).toLocaleString()}</td>
+                    {activeAdditions.map(a => <td key={a.index} style={valCol}>{Number(row.custom_additions?.[a.index] || 0).toLocaleString()}</td>)}
+                    <td style={{...valCol, fontWeight:'bold', background:'#f8fafc'}}>{Number(row.gross_pay).toLocaleString()}</td>
+                    <td style={dedCol}>{Number(row.time_deduction || 0).toLocaleString()}</td>
+                    {activeDeductions.map(d => <td key={d.index} style={dedCol}>{Number(row.custom_deductions?.[d.index] || 0).toLocaleString()}</td>)}
+                    <td style={dedCol}>{Number(row.loan_deduction || 0).toLocaleString()}</td>
+                    <td style={statCol}>{Number(row.sss_deduction).toLocaleString()}</td>
+                    <td style={statCol}>{Number(row.philhealth_deduction).toLocaleString()}</td>
+                    <td style={statCol}>{Number(row.pagibig_deduction).toLocaleString()}</td>
+                    <td style={statCol}>{Number(row.tax_deduction).toLocaleString()}</td>
+                    <td className="net-col" style={netCol}>₱{Number(row.net_pay).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                  </tr>
+                </React.Fragment>
               );
             })}
           </tbody>
